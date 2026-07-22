@@ -406,6 +406,7 @@ public class ComponentResource extends AbstractApiResource {
                 }
                 component.setParent(parent);
                 component.setNotes(StringUtils.trimToNull(jsonComponent.getNotes()));
+                component.setManuallyCreated(true);
 
                 qm.createComponent(component, true);
 
@@ -433,6 +434,7 @@ public class ComponentResource extends AbstractApiResource {
                     description = "Access to the requested project is forbidden",
                     content = @Content(schema = @Schema(implementation = ProblemDetails.class), mediaType = ProblemDetails.MEDIA_TYPE_JSON)),
             @ApiResponse(responseCode = "404", description = "The UUID of the component could not be found"),
+            @ApiResponse(responseCode = "405", description = "The component was imported from a BOM and is read-only; only manually created components can be modified"),
     })
     @PermissionRequired({Permissions.Constants.PORTFOLIO_MANAGEMENT, Permissions.Constants.PORTFOLIO_MANAGEMENT_UPDATE})
     public Response updateComponent(Component jsonComponent) {
@@ -463,6 +465,9 @@ public class ComponentResource extends AbstractApiResource {
                 final Component component = qm.getObjectByUuid(Component.class, jsonComponent.getUuid());
                 if (component != null) {
                     requireAccess(qm, component.getProject());
+                    if (!component.isManuallyCreated()) {
+                        return importedComponentsAreReadOnly();
+                    }
                     // Name cannot be empty or null - prevent it
                     final String name = StringUtils.trimToNull(jsonComponent.getName());
                     if (name != null) {
@@ -540,7 +545,8 @@ public class ComponentResource extends AbstractApiResource {
                     responseCode = "403",
                     description = "Access to the requested project is forbidden",
                     content = @Content(schema = @Schema(implementation = ProblemDetails.class), mediaType = ProblemDetails.MEDIA_TYPE_JSON)),
-            @ApiResponse(responseCode = "404", description = "The UUID of the component could not be found")
+            @ApiResponse(responseCode = "404", description = "The UUID of the component could not be found"),
+            @ApiResponse(responseCode = "405", description = "The component was imported from a BOM and is read-only; only manually created components can be modified"),
     })
     @PermissionRequired({Permissions.Constants.PORTFOLIO_MANAGEMENT, Permissions.Constants.PORTFOLIO_MANAGEMENT_DELETE})
     public Response deleteComponent(
@@ -551,6 +557,9 @@ public class ComponentResource extends AbstractApiResource {
                 final Component component = qm.getObjectByUuid(Component.class, uuid, Component.FetchGroup.ALL.name());
                 if (component != null) {
                     requireAccess(qm, component.getProject());
+                    if (!component.isManuallyCreated()) {
+                        return importedComponentsAreReadOnly();
+                    }
                     try (final Handle jdbiHandle = openJdbiHandle()) {
                         final var componentDao = jdbiHandle.attach(ComponentDao.class);
                         componentDao.deleteComponent(component.getUuid());
@@ -666,4 +675,15 @@ public class ComponentResource extends AbstractApiResource {
         return Response.ok(occurrences).header(TOTAL_COUNT_HEADER, totalCount).build();
     }
 
+    /**
+     * Imported components are managed exclusively by SBOM uploads; license
+     * curation happens via component analyses and component policies. Only
+     * components that were created manually through the REST API may be
+     * modified or deleted.
+     */
+    private static Response importedComponentsAreReadOnly() {
+        return Response.status(Response.Status.METHOD_NOT_ALLOWED)
+                .entity("Imported components are read-only: they are managed by SBOM uploads and curated via component analyses or component policies. Only manually created components can be modified.")
+                .build();
+    }
 }

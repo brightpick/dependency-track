@@ -122,7 +122,8 @@ public class ComponentPropertyResource extends AbstractConfigPropertyResource {
                     description = "Access to the requested project is forbidden",
                     content = @Content(schema = @Schema(implementation = ProblemDetails.class), mediaType = ProblemDetails.MEDIA_TYPE_JSON)),
             @ApiResponse(responseCode = "404", description = "The component could not be found"),
-            @ApiResponse(responseCode = "409", description = "A property with the specified component/group/name combination already exists")
+            @ApiResponse(responseCode = "409", description = "A property with the specified component/group/name combination already exists"),
+            @ApiResponse(responseCode = "405", description = "The component was imported from a BOM and is read-only; only manually created components can be modified")
     })
     @PermissionRequired({Permissions.Constants.PORTFOLIO_MANAGEMENT, Permissions.Constants.PORTFOLIO_MANAGEMENT_CREATE})
     public Response createProperty(
@@ -141,6 +142,9 @@ public class ComponentPropertyResource extends AbstractConfigPropertyResource {
                 final Component component = qm.getObjectByUuid(Component.class, uuid);
                 if (component != null) {
                     requireAccess(qm, component.getProject());
+                    if (!component.isManuallyCreated()) {
+                        return importedComponentsAreReadOnly();
+                    }
                     final List<ComponentProperty> existingProperties = qm.getComponentProperties(component,
                             StringUtils.trimToNull(json.getGroupName()), StringUtils.trimToNull(json.getPropertyName()));
                     final var jsonPropertyIdentity = new ComponentProperty.Identity(json);
@@ -182,6 +186,7 @@ public class ComponentPropertyResource extends AbstractConfigPropertyResource {
                     description = "Access to the requested project is forbidden",
                     content = @Content(schema = @Schema(implementation = ProblemDetails.class), mediaType = ProblemDetails.MEDIA_TYPE_JSON)),
             @ApiResponse(responseCode = "404", description = "The component or component property could not be found"),
+            @ApiResponse(responseCode = "405", description = "The component was imported from a BOM and is read-only; only manually created components can be modified")
     })
     @PermissionRequired({Permissions.Constants.PORTFOLIO_MANAGEMENT, Permissions.Constants.PORTFOLIO_MANAGEMENT_DELETE})
     public Response deleteProperty(
@@ -194,6 +199,9 @@ public class ComponentPropertyResource extends AbstractConfigPropertyResource {
                 final Component component = qm.getObjectByUuid(Component.class, componentUuid);
                 if (component != null) {
                     requireAccess(qm, component.getProject());
+                    if (!component.isManuallyCreated()) {
+                        return importedComponentsAreReadOnly();
+                    }
                     final long propertiesDeleted = qm.deleteComponentPropertyByUuid(component, UUID.fromString(propertyUuid));
                     if (propertiesDeleted > 0) {
                         return Response.status(Response.Status.NO_CONTENT).build();
@@ -205,5 +213,17 @@ public class ComponentPropertyResource extends AbstractConfigPropertyResource {
                 }
             });
         }
+    }
+
+    /**
+     * Imported components are managed exclusively by SBOM uploads; license
+     * curation happens via component analyses and component policies. Only
+     * components that were created manually through the REST API may be
+     * modified or deleted.
+     */
+    private static Response importedComponentsAreReadOnly() {
+        return Response.status(Response.Status.METHOD_NOT_ALLOWED)
+                .entity("Imported components are read-only: they are managed by SBOM uploads and curated via component analyses or component policies. Only manually created components can be modified.")
+                .build();
     }
 }

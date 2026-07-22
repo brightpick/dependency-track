@@ -635,6 +635,7 @@ public class ComponentResourceTest extends ResourceTest {
         Assertions.assertEquals("SampleAuthor" ,json.getJsonArray("authors").getJsonObject(0).getString("name"));
         Assertions.assertEquals("APPLICATION", json.getString("classifier"));
         Assertions.assertTrue(UuidUtil.isValidUUID(json.getString("uuid")));
+        Assertions.assertTrue(json.getBoolean("manuallyCreated"));
     }
 
     @Test
@@ -719,6 +720,7 @@ public class ComponentResourceTest extends ResourceTest {
         component.setName("My Component");
         component.setVersion("1.0");
         component.setClassifier(Classifier.APPLICATION);
+        component.setManuallyCreated(true);
         qm.createComponent(component, false);
 
         var jsonComponent = new Component();
@@ -804,6 +806,7 @@ public class ComponentResourceTest extends ResourceTest {
         component.setDescription("some description");
         component.setLicense("Apache-2.0");
         component.setCopyright("Copyright Acme");
+        component.setManuallyCreated(true);
         qm.persist(component);
 
         final Response response = jersey.target(V1_COMPONENT).request()
@@ -864,6 +867,7 @@ public class ComponentResourceTest extends ResourceTest {
         component.setProject(project);
         component.setName("acme-lib");
         component.setVersion("1.0.0");
+        component.setManuallyCreated(true);
         qm.persist(component);
 
         final var jsonComponent = new Component();
@@ -909,6 +913,7 @@ public class ComponentResourceTest extends ResourceTest {
         final var component = new Component();
         component.setProject(project);
         component.setName("acme-lib");
+        component.setManuallyCreated(true);
         qm.persist(component);
 
         final Supplier<Response> responseSupplier = () -> jersey.target(V1_COMPONENT).request()
@@ -946,6 +951,7 @@ public class ComponentResourceTest extends ResourceTest {
         component.setUuid(UUID.randomUUID());
         component.setName("My Component");
         component.setVersion("1.0");
+        component.setManuallyCreated(true);
         component = qm.createComponent(component, false);
         Response response = jersey.target(V1_COMPONENT + "/" + component.getUuid().toString())
                 .request().header(X_API_KEY, apiKey).delete();
@@ -978,6 +984,7 @@ public class ComponentResourceTest extends ResourceTest {
         final var component = new Component();
         component.setProject(project);
         component.setName("acme-lib");
+        component.setManuallyCreated(true);
         qm.persist(component);
 
         final Supplier<Response> responseSupplier = () -> jersey
@@ -999,6 +1006,56 @@ public class ComponentResourceTest extends ResourceTest {
 
         response = responseSupplier.get();
         assertThat(response.getStatus()).isEqualTo(204);
+    }
+
+    @Test
+    public void updateImportedComponentTest() {
+        initializeWithPermissions(Permissions.PORTFOLIO_MANAGEMENT_UPDATE);
+
+        final var project = new Project();
+        project.setName("acme-app");
+        qm.persist(project);
+
+        final var component = new Component();
+        component.setProject(project);
+        component.setName("acme-lib");
+        qm.persist(component);
+
+        final Response response = jersey.target(V1_COMPONENT).request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "uuid": "%s",
+                          "name": "acme-lib-foobar",
+                          "classifier": "LIBRARY"
+                        }
+                        """.formatted(component.getUuid())));
+
+        assertThat(response.getStatus()).isEqualTo(405);
+        assertThat(response.readEntity(String.class)).isEqualTo(
+                "Imported components are read-only: they are managed by SBOM uploads and curated via component analyses or component policies. Only manually created components can be modified.");
+    }
+
+    @Test
+    public void deleteImportedComponentTest() {
+        initializeWithPermissions(Permissions.PORTFOLIO_MANAGEMENT_DELETE);
+
+        final var project = new Project();
+        project.setName("acme-app");
+        qm.persist(project);
+
+        final var component = new Component();
+        component.setProject(project);
+        component.setName("acme-lib");
+        qm.persist(component);
+
+        final Response response = jersey.target(V1_COMPONENT + "/" + component.getUuid()).request()
+                .header(X_API_KEY, apiKey)
+                .delete();
+
+        assertThat(response.getStatus()).isEqualTo(405);
+        assertThat(response.readEntity(String.class)).isEqualTo(
+                "Imported components are read-only: they are managed by SBOM uploads and curated via component analyses or component policies. Only manually created components can be modified.");
     }
 
     @Test
@@ -1345,6 +1402,7 @@ public class ComponentResourceTest extends ResourceTest {
                           },
                           "expandDependencyGraph": false,
                           "isInternal": false,
+                          "manuallyCreated": false,
                           "occurrenceCount": 0
                         }
                         """);
