@@ -603,6 +603,9 @@ public interface ComponentDao extends SqlObject, PaginationSupport {
                 component.setProject(project);
             }
             maybeSet(rs, "PURL", ResultSet::getString, component::setPurl);
+            // the free-text license name is aliased apart from the resolved
+            // license's "licenseName", so no setter matches it by name
+            maybeSet(rs, "componentLicenseName", ResultSet::getString, component::setLicense);
             if (rs.getString("LAST_RISKSCORE") != null) {
                 maybeSet(rs, "LAST_RISKSCORE", ResultSet::getDouble, component::setLastInheritedRiskScore);
             }

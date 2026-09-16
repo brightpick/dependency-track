@@ -136,6 +136,29 @@ public class ProjectsResourceTest extends ResourceTest {
     }
 
     @Test
+    public void listProjectComponentsReturnsTheDeclaredLicenseName() {
+        initializeWithPermissions(Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("Acme Application", null, null, null, null, null, null, false);
+        final var component = new Component();
+        component.setProject(project);
+        component.setName("oddname");
+        component.setVersion("0.9.0");
+        component.setPurl("pkg:pypi/oddname@0.9.0");
+        // a free-text name the license catalogue does not know: no resolved license
+        component.setLicense("Apache 2.0");
+        qm.createComponent(component, false);
+
+        final Response response = jersey.target("/projects/" + project.getUuid() + "/components")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        assertThat(response.getStatus()).isEqualTo(200);
+        final JsonObject item = parseJsonObject(response).getJsonArray("items").getJsonObject(0);
+        assertThat(item.getString("license")).isEqualTo("Apache 2.0");
+        assertThat(item.containsKey("resolved_license")).isFalse();
+    }
+
+    @Test
     public void shouldFilterProjectComponentsBySearchText() {
         initializeWithPermissions(Permissions.VIEW_PORTFOLIO);
 
