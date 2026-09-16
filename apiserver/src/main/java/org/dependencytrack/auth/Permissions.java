@@ -46,6 +46,7 @@ public enum Permissions {
     VULNERABILITY_MANAGEMENT_UPDATE("Allows updating internally-defined vulnerabilities and vulnerability tags"),
     VULNERABILITY_MANAGEMENT_DELETE("Allows management of internally-defined vulnerabilities"),
     POLICY_VIOLATION_ANALYSIS("Provides the ability to make analysis decisions on policy violations"),
+    COMPONENT_ANALYSIS("Provides the ability to make license curation decisions on components: override the declared license and comment on the decision"),
     ACCESS_MANAGEMENT("Allows the management of users, teams, and API keys"),
     ACCESS_MANAGEMENT_CREATE("Allows create permissions of users, teams, and API keys"),
     ACCESS_MANAGEMENT_READ("Allows read permissions of users, teams, and API keys"),
@@ -100,6 +101,7 @@ public enum Permissions {
         public static final String VULNERABILITY_MANAGEMENT_UPDATE = "VULNERABILITY_MANAGEMENT_UPDATE";
         public static final String VULNERABILITY_MANAGEMENT_DELETE = "VULNERABILITY_MANAGEMENT_DELETE";
         public static final String POLICY_VIOLATION_ANALYSIS = "POLICY_VIOLATION_ANALYSIS";
+        public static final String COMPONENT_ANALYSIS = "COMPONENT_ANALYSIS";
         public static final String ACCESS_MANAGEMENT = "ACCESS_MANAGEMENT";
         public static final String ACCESS_MANAGEMENT_CREATE = "ACCESS_MANAGEMENT_CREATE";
         public static final String ACCESS_MANAGEMENT_READ = "ACCESS_MANAGEMENT_READ";

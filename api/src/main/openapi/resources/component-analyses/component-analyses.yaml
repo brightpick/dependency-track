@@ -58,7 +58,7 @@ put:
     audit trail. The curation is
     re-applied on every BOM ingest.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `COMPONENT_ANALYSIS`.
   tags:
     - Component Analyses
   requestBody:

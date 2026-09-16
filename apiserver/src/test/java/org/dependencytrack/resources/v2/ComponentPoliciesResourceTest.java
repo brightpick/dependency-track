@@ -95,6 +95,35 @@ class ComponentPoliciesResourceTest extends ResourceTest {
     }
 
     @Test
+    void shouldCreateAndListComponentPolicyWithTheCurationPermissionAlone() {
+        // curation at scale: the curation permission suffices, policy management is not needed
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "acme-curation",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license": "Apache-2.0",
+                          "enabled": true,
+                          "priority": 5
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(201);
+
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        assertThat(listResponse.getStatus()).isEqualTo(200);
+    }
+
+    @Test
     void shouldRejectCreateWithInvalidCelCondition() {
         initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
 

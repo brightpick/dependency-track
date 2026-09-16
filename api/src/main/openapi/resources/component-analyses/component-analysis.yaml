@@ -29,7 +29,7 @@ delete:
     Deletes a component analysis and its audit trail. The component's
     license reverts to the BOM-declared state on the next upload.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `COMPONENT_ANALYSIS`.
   tags:
     - Component Analyses
   responses:

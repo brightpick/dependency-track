@@ -29,6 +29,8 @@ import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.model.Component;
 import org.dependencytrack.model.License;
 import org.dependencytrack.model.Project;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 
@@ -38,6 +40,7 @@ import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.useJdbiHandle;
 import static org.assertj.core.api.Assertions.fail;
+import static org.dependencytrack.persistence.jdbi.JdbiFactory.inJdbiTransaction;
 
 class ComponentAnalysesResourceTest extends ResourceTest {
 
@@ -47,7 +50,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldCreateAnalysisWithAuditTrail() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
 
@@ -99,7 +102,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldApplyLicenseToMatchingComponentsImmediately() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         final License apache = createSpdxLicense("Apache-2.0", "Apache License 2.0");
         final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
@@ -134,7 +137,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldListAnalysesByProject() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         final Project otherProject = qm.createProject("other-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
@@ -197,7 +200,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldRecordLicenseTransitionOnUpdate() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
         createSpdxLicense("MIT", "MIT License");
@@ -235,7 +238,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldRestoreDeclaredLicenseWhenOverrideCleared() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
         final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Proprietary Foo");
@@ -282,7 +285,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldCreateManualComment() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
 
@@ -320,7 +323,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldDeleteAnalysis() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
 
@@ -350,7 +353,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldReturn404WhenDeletingNonExistentAnalysis() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
 
         final Response response = jersey
                 .target("/component-analyses/999999")
@@ -378,7 +381,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldReturn403WhenListingWithoutViewPortfolioPermission() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
 
         final Response response = listAnalyses(project.getUuid());
@@ -388,7 +391,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void deletingAnAnalysisWhoseLicenseLeftTheCatalogueStillRestoresTheUpload() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
         final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
@@ -424,7 +427,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void deletingAnAnalysisRestoresTheUploadedLicense() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
         final License apache = createSpdxLicense("Apache-2.0", "Apache License 2.0");
@@ -469,7 +472,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldApplyExpressionOverrideAndClearOtherSlots() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
@@ -508,7 +511,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldApplyNameOverride() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         final License apache = createSpdxLicense("Apache-2.0", "Apache License 2.0");
         final var component = new Component();
@@ -540,7 +543,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldRejectExpressionWithUnknownOperand() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
 
@@ -561,7 +564,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldRejectMoreThanOneLicenseSlot() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
 
@@ -581,7 +584,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void shouldRestoreDeclaredLicenseWhenExpressionOverrideCleared() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
         final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Proprietary Foo");
@@ -620,7 +623,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void expressionWithAnExceptionIsAccepted() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("GPL-2.0-only", "GNU General Public License v2.0 only");
         final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
@@ -645,7 +648,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void malformedExpressionsAreRejected() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
         createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
@@ -668,7 +671,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
     @Test
     void unknownExpressionOperandIsNamedInTheRejection() {
-        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
         createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
@@ -685,6 +688,42 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         assertThat(response.getStatus()).isEqualTo(400);
         assertThatJson(getPlainTextBody(response))
                 .node("detail").isString().contains("Foo-1.0");
+    }
+
+    @Test
+    void analysesAreScopedToTheProjectsTheTeamMayAccess() {
+        enablePortfolioAccessControl();
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+        final String body = /* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license": "MIT"
+                }
+                """.formatted(project.getUuid());
+        // an analysis that exists without the API: its id is no way around the project
+        final long analysisId = inJdbiTransaction(handle -> new ComponentAnalysisDao(handle).upsert(
+                project.getId(), null, "org.acme", "acme-lib", "1.0.0", LicenseOverride.NONE, "note"));
+
+        assertThat(upsertAnalysis(body).getStatus()).isEqualTo(403);
+        assertThat(listAnalyses(project.getUuid()).getStatus()).isEqualTo(403);
+        assertThat(getComments(analysisId).getStatus()).isEqualTo(403);
+        assertThat(jersey.target("/component-analyses/%d/comments".formatted(analysisId)).request()
+                .header(X_API_KEY, apiKey).post(Entity.json("{\"comment\": \"hi\"}")).getStatus()).isEqualTo(403);
+        assertThat(jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(403);
+
+        project.addAccessTeam(team);
+        qm.persist(project);
+
+        assertThat(upsertAnalysis(body).getStatus()).isEqualTo(204);
+        assertThat(listAnalyses(project.getUuid()).getStatus()).isEqualTo(200);
+        assertThat(getComments(analysisId).getStatus()).isEqualTo(200);
     }
 
     private Response upsertAnalysis(final String requestBody) {
@@ -728,6 +767,33 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         license.setLicenseId(licenseId);
         license.setName(name);
         return qm.persist(license);
+    }
+
+    @Test
+    public void curationRequiresTheComponentAnalysisPermission() {
+        // managing policies is a different authority: it does not curate
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license": "Apache-2.0"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(response.getStatus()).isEqualTo(403);
+
+        // reading the analyses needs only VIEW_PORTFOLIO
+        final Response listResponse = jersey.target("/component-analyses")
+                .queryParam("project", project.getUuid())
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        assertThat(listResponse.getStatus()).isEqualTo(200);
     }
 
     private Component createComponent(

@@ -47,6 +47,11 @@ import static org.dependencytrack.persistence.jdbi.JdbiFactory.withJdbiHandle;
 
 /**
  * REST resource for component policies (automated license curation rules).
+ * <p>
+ * A component policy is curation at scale — it writes the same component
+ * analyses a manual override does — so the curation permission grants it,
+ * next to policy management. The portfolio gate policies stay with policy
+ * management alone.
  */
 @Provider
 public final class ComponentPoliciesResource extends AbstractApiResource implements ComponentPoliciesApi {
@@ -55,7 +60,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     private UriInfo uriInfo;
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response listComponentPolicies() {
         final List<ComponentPolicyDao.ComponentPolicy> policies = withJdbiHandle(
                 handle -> new ComponentPolicyDao(handle).getAll());
@@ -69,7 +74,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response createComponentPolicy(final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
@@ -91,7 +96,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response updateComponentPolicy(final Long id, final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
@@ -112,7 +117,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response deleteComponentPolicy(final Long id) {
         final boolean deleted = inJdbiTransaction(
                 handle -> new ComponentPolicyDao(handle).delete(id));

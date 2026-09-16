@@ -27,7 +27,7 @@ put:
   summary: Update a component policy
   description: |-
     In the condition, `component.license_curated` is the persisted state: every import resets it before the component policies run, so it reads false there; it is meaningful to the portfolio policies evaluated afterwards.
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies
   requestBody:
@@ -62,7 +62,7 @@ delete:
     Analyses applied by the policy are kept, including their audit
     trails; they become manual analyses.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies
   responses:

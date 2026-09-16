@@ -32,6 +32,7 @@ import org.dependencytrack.api.v2.model.ListComponentAnalysisCommentsResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentAnalysisRequest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.model.License;
+import org.dependencytrack.model.Project;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.resources.AbstractApiResource;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
@@ -59,24 +60,23 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     @Override
     @PermissionRequired(Permissions.Constants.VIEW_PORTFOLIO)
     public Response listComponentAnalyses(final UUID project) {
-        final long projectId = requireProjectId(project);
-        final List<ComponentAnalysis> analyses = withJdbiHandle(
-                handle -> new ComponentAnalysisDao(handle).getAllByProject(projectId));
-        final var items = new ArrayList<org.dependencytrack.api.v2.model.ComponentAnalysis>(analyses.size());
         try (final var qm = new QueryManager()) {
+            final long projectId = requireProject(qm, project).getId();
+            final List<ComponentAnalysis> analyses = withJdbiHandle(
+                    handle -> new ComponentAnalysisDao(handle).getAllByProject(projectId));
+            final var items = new ArrayList<org.dependencytrack.api.v2.model.ComponentAnalysis>(analyses.size());
             for (final ComponentAnalysis analysis : analyses) {
                 items.add(mapAnalysis(qm, analysis));
             }
+            return Response.ok(ListComponentAnalysesResponse.builder().analyses(items).build()).build();
         }
-        return Response.ok(ListComponentAnalysesResponse.builder().analyses(items).build()).build();
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response updateComponentAnalysis(final UpsertComponentAnalysisRequest request) {
-        final long projectId = requireProjectId(request.getProjectUuid());
-
         try (final var qm = new QueryManager()) {
+            final long projectId = requireProject(qm, request.getProjectUuid()).getId();
             final LicenseOverride override = LicenseOverrideResolver.resolve(
                     qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
 
@@ -144,9 +144,12 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response deleteComponentAnalysis(final Long id) {
-        final ComponentAnalysis analysis = requireAnalysis(id);
+        final ComponentAnalysis analysis;
+        try (final var qm = new QueryManager()) {
+            analysis = requireAnalysis(qm, id);
+        }
         inJdbiTransaction(handle -> {
             final var dao = new ComponentAnalysisDao(handle);
             // the component carries the uploaded license again, not the deleted
@@ -170,6 +173,9 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     @Override
     @PermissionRequired(Permissions.Constants.VIEW_PORTFOLIO)
     public Response listComponentAnalysisComments(final Long id) {
+        try (final var qm = new QueryManager()) {
+            requireAnalysis(qm, id);
+        }
         final List<ComponentAnalysisDao.ComponentAnalysisComment> comments = withJdbiHandle(
                 handle -> new ComponentAnalysisDao(handle).getComments(id));
         return Response.ok(ListComponentAnalysisCommentsResponse.builder()
@@ -184,8 +190,11 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response createComponentAnalysisComment(final Long id, final CreateComponentAnalysisCommentRequest request) {
+        try (final var qm = new QueryManager()) {
+            requireAnalysis(qm, id);
+        }
         final String commenter = getPrincipal().getName();
         inJdbiTransaction(handle -> new ComponentAnalysisDao(handle)
                 .createComments(List.of(new CreateCommentCommand(id, commenter, request.getComment()))));
@@ -197,22 +206,32 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 .build();
     }
 
-    private static ComponentAnalysis requireAnalysis(final long id) {
-        return withJdbiHandle(handle -> new ComponentAnalysisDao(handle).getById(id))
-                .orElseThrow(NotFoundException::new);
-    }
-
-    private static long requireProjectId(final UUID uuid) {
-        final Long projectId = withJdbiHandle(handle -> handle
-                .createQuery("SELECT \"ID\" FROM \"PROJECT\" WHERE \"UUID\" = :uuid")
-                .bind("uuid", uuid)
-                .mapTo(Long.class)
-                .findOne()
-                .orElse(null));
-        if (projectId == null) {
+    /**
+     * Curation is scoped like everything else in the portfolio: the project
+     * must exist (404) and the principal must have access to it (403).
+     */
+    private Project requireProject(final QueryManager qm, final UUID uuid) {
+        final Project project = qm.getObjectByUuid(Project.class, uuid);
+        if (project == null) {
             throw new NotFoundException();
         }
-        return projectId;
+        requireAccess(qm, project);
+        return project;
+    }
+
+    /**
+     * An analysis addressed by id carries its project; access is checked on
+     * that project.
+     */
+    private ComponentAnalysis requireAnalysis(final QueryManager qm, final long id) {
+        final ComponentAnalysis analysis = withJdbiHandle(handle -> new ComponentAnalysisDao(handle).getById(id))
+                .orElseThrow(NotFoundException::new);
+        final Project project = qm.getObjectById(Project.class, analysis.projectId());
+        if (project == null) {
+            throw new NotFoundException();
+        }
+        requireAccess(qm, project);
+        return analysis;
     }
 
     /**
