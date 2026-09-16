@@ -119,11 +119,15 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
         final JsonObject analysis = getAnalysisFromList(project.getUuid(), "acme-lib");
         assertThat(analysis.getString("declared_license")).isEqualTo("Unknown License");
+        assertThat(analysis.getString("declared_license_kind")).isEqualTo("name");
 
         qm.getPersistenceManager().evictAll();
         final Component updatedComponent = qm.getObjectByUuid(Component.class, component.getUuid());
         assertThat(updatedComponent.getResolvedLicense()).isNotNull();
         assertThat(updatedComponent.getResolvedLicense().getId()).isEqualTo(apache.getId());
+        // the id slot alone: the other two are cleared
+        assertThat(updatedComponent.getLicense()).isNull();
+        assertThat(updatedComponent.getLicenseExpression()).isNull();
         assertThat(updatedComponent.isLicenseCurated()).isTrue();
         assertThat(updatedComponent.getNotes()).isEqualTo("curated");
     }
@@ -453,6 +457,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         assertThat(upsertAnalysis(body.formatted(project.getUuid(), "Apache-2.0")).getStatus()).isEqualTo(204);
         final JsonObject analysis = getAnalysisFromList(project.getUuid(), "acme-lib");
         assertThat(analysis.getString("declared_license")).isEqualTo("Unknown License");
+        assertThat(analysis.getString("declared_license_kind")).isEqualTo("name");
         qm.getPersistenceManager().evictAll();
         reloaded = qm.getObjectByUuid(Component.class, component.getUuid());
         assertThat(reloaded.getResolvedLicense().getId()).isEqualTo(apache.getId());
@@ -460,6 +465,226 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
         assertThat(jersey.target("/component-analyses/" + analysisId).request()
                 .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void shouldApplyExpressionOverrideAndClearOtherSlots() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Apache-2.0 AND MIT");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "MIT OR Apache-2.0"
+                }
+                """.formatted(project.getUuid()));
+
+        assertThat(response.getStatus()).isEqualTo(204);
+
+        final JsonObject analysis = getAnalysisFromList(project.getUuid(), "acme-lib");
+        assertThat(analysis.getString("license_expression")).isEqualTo("MIT OR Apache-2.0");
+        assertThat(analysis.containsKey("license")).isFalse();
+        assertThat(analysis.getString("declared_license")).isEqualTo("Apache-2.0 AND MIT");
+        assertThat(analysis.getString("declared_license_kind")).isEqualTo("name");
+
+        qm.getPersistenceManager().evictAll();
+        final Component updatedComponent = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(updatedComponent.getLicenseExpression()).isEqualTo("MIT OR Apache-2.0");
+        assertThat(updatedComponent.getResolvedLicense()).isNull();
+        assertThat(updatedComponent.getLicense()).isNull();
+        assertThat(updatedComponent.isLicenseCurated()).isTrue();
+
+        final Response commentsResponse = getComments(analysis.getJsonNumber("id").longValue());
+        assertThatJson(getPlainTextBody(commentsResponse))
+                .node("comments").isArray().anySatisfy(comment -> assertThatJson(comment)
+                        .node("comment").isEqualTo("License override: not set → MIT OR Apache-2.0"));
+    }
+
+    @Test
+    void shouldApplyNameOverride() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        final License apache = createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final var component = new Component();
+        component.setProject(project);
+        component.setName("acme-lib");
+        component.setResolvedLicense(apache);
+        component.setLicenseExpression("Apache-2.0 OR MIT");
+        qm.createComponent(component, false);
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "name": "acme-lib",
+                  "license_name": "Acme Proprietary EULA"
+                }
+                """.formatted(project.getUuid()));
+
+        assertThat(response.getStatus()).isEqualTo(204);
+        final JsonObject analysis = getAnalysisFromList(project.getUuid(), "acme-lib");
+        assertThat(analysis.getString("license_name")).isEqualTo("Acme Proprietary EULA");
+
+        qm.getPersistenceManager().evictAll();
+        final Component updatedComponent = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(updatedComponent.getLicense()).isEqualTo("Acme Proprietary EULA");
+        assertThat(updatedComponent.getResolvedLicense()).isNull();
+        assertThat(updatedComponent.getLicenseExpression()).isNull();
+        assertThat(updatedComponent.isLicenseCurated()).isTrue();
+    }
+
+    @Test
+    void shouldRejectExpressionWithUnknownOperand() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "name": "acme-lib",
+                  "license_expression": "MIT OR No-Such-License-1.0"
+                }
+                """.formatted(project.getUuid()));
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().startsWith("License No-Such-License-1.0 is not known");
+        final Response listResponse = listAnalyses(project.getUuid());
+        assertThatJson(getPlainTextBody(listResponse)).node("analyses").isArray().isEmpty();
+    }
+
+    @Test
+    void shouldRejectMoreThanOneLicenseSlot() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "name": "acme-lib",
+                  "license": "MIT",
+                  "license_expression": "MIT OR Apache-2.0"
+                }
+                """.formatted(project.getUuid()));
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().startsWith("Exactly one of license");
+    }
+
+    @Test
+    void shouldRestoreDeclaredLicenseWhenExpressionOverrideCleared() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Proprietary Foo");
+
+        final Response overrideResponse = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "MIT AND MIT"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(overrideResponse.getStatus()).isEqualTo(204);
+
+        final Response clearResponse = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(clearResponse.getStatus()).isEqualTo(204);
+
+        final JsonObject clearedAnalysis = getAnalysisFromList(project.getUuid(), "acme-lib");
+        assertThat(clearedAnalysis.containsKey("license_expression")).isFalse();
+        assertThat(clearedAnalysis.getString("declared_license")).isEqualTo("Proprietary Foo");
+
+        qm.getPersistenceManager().evictAll();
+        final Component restoredComponent = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(restoredComponent.getLicenseExpression()).isNull();
+        assertThat(restoredComponent.getLicense()).isEqualTo("Proprietary Foo");
+        assertThat(restoredComponent.isLicenseCurated()).isFalse();
+    }
+
+    @Test
+    void expressionWithAnExceptionIsAccepted() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("GPL-2.0-only", "GNU General Public License v2.0 only");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "GPL-2.0-only WITH Classpath-exception-2.0"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(response.getStatus()).isEqualTo(204);
+
+        qm.getPersistenceManager().evictAll();
+        final Component reloaded = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(reloaded.getLicenseExpression()).isEqualTo("GPL-2.0-only WITH Classpath-exception-2.0");
+        assertThat(reloaded.getResolvedLicense()).isNull();
+        assertThat(reloaded.isLicenseCurated()).isTrue();
+    }
+
+    @Test
+    void malformedExpressionsAreRejected() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        for (final String expression : new String[]{"MIT AND (", "(MIT", "MIT AND ", "MIT MIT", "AND MIT"}) {
+            final Response response = upsertAnalysis(/* language=JSON */ """
+                    {
+                      "project_uuid": "%s",
+                      "group": "org.acme",
+                      "name": "acme-lib",
+                      "version": "1.0.0",
+                      "license_expression": "%s"
+                    }
+                    """.formatted(project.getUuid(), expression));
+            assertThat(response.getStatus()).as(expression).isEqualTo(400);
+            assertThatJson(getPlainTextBody(response))
+                    .node("detail").isString().startsWith("Invalid SPDX expression");
+        }
+    }
+
+    @Test
+    void unknownExpressionOperandIsNamedInTheRejection() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "MIT AND Foo-1.0+"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().contains("Foo-1.0");
     }
 
     private Response upsertAnalysis(final String requestBody) {

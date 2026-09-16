@@ -23,6 +23,7 @@ import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,10 +85,14 @@ public final class ComponentAnalysisApplier {
         if (analysis == null) {
             return;
         }
-        if (analysis.licenseId() != null) {
-            final License license = licenseCache.computeIfAbsent(
-                    analysis.licenseId(), id -> qm.getObjectById(License.class, id));
-            if (license != null) {
+        final LicenseOverride override = analysis.override();
+        if (!override.isEmpty()) {
+            final License license = override.licenseId() != null
+                    ? licenseCache.computeIfAbsent(override.licenseId(), id -> qm.getObjectById(License.class, id))
+                    : null;
+            if (override.licenseId() != null && license == null) {
+                LOGGER.warn("Component analysis {} references a license that no longer exists; skipping license override", analysis.id());
+            } else {
                 // refresh the declared snapshot from what this upload brought,
                 // BEFORE overriding — clearing the override restores it
                 withJdbiHandle(handle -> {
@@ -99,11 +104,11 @@ public final class ComponentAnalysisApplier {
                             component.getLicenseExpression());
                     return null;
                 });
+                // the override fills its slot and clears the other two
                 component.setResolvedLicense(license);
-                component.setLicenseExpression(null);
+                component.setLicenseExpression(override.licenseExpression());
+                component.setLicense(override.licenseName());
                 component.setLicenseCurated(true);
-            } else {
-                LOGGER.warn("Component analysis {} references a license that no longer exists; skipping license override", analysis.id());
             }
         }
         if (analysis.details() != null) {

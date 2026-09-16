@@ -28,6 +28,7 @@ import org.dependencytrack.model.License;
 import org.dependencytrack.model.Project;
 import org.dependencytrack.notification.NotificationScope;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.proto.internal.workflow.v1.ImportBomArg;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,7 +100,7 @@ class ImportBomActivityCurationTest extends PersistenceCapableTest {
         assertThat(component.getResolvedLicense().getId()).isEqualTo(mit.getId());
         assertThat(component.isLicenseCurated()).isFalse();
 
-        curate(apache.getId());
+        curate(new LicenseOverride(apache.getId(), null, null));
 
         upload();
         component = theComponent();
@@ -114,7 +115,7 @@ class ImportBomActivityCurationTest extends PersistenceCapableTest {
     @Test
     void deletedAnalysisLeavesNoFlagBehindOnTheNextImport() throws Exception {
         upload();
-        final long analysisId = curate(apache.getId());
+        final long analysisId = curate(new LicenseOverride(apache.getId(), null, null));
         upload();
         assertThat(theComponent().isLicenseCurated()).isTrue();
 
@@ -132,7 +133,7 @@ class ImportBomActivityCurationTest extends PersistenceCapableTest {
         final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
                 "acme curation", null, "tester", true, 0,
                 "component.name == \"acme-lib\"",
-                apache.getId(), null, null, null));
+                new LicenseOverride(apache.getId(), null, null), null, null, null));
 
         upload();
         Component component = theComponent();
@@ -143,7 +144,7 @@ class ImportBomActivityCurationTest extends PersistenceCapableTest {
         inJdbiTransaction(handle -> new ComponentPolicyDao(handle).update(
                 policyId, "acme curation", null, true, 0,
                 "component.name == \"something-else\"",
-                apache.getId(), null, null, null));
+                new LicenseOverride(apache.getId(), null, null), null, null, null));
 
         upload();
         component = theComponent();
@@ -164,11 +165,11 @@ class ImportBomActivityCurationTest extends PersistenceCapableTest {
                 .build());
     }
 
-    private long curate(final Long licenseId) {
+    private long curate(final LicenseOverride override) {
         return inJdbiTransaction(handle -> {
             final var dao = new ComponentAnalysisDao(handle);
-            final long id = dao.upsert(project.getId(), PURL, "org.acme", "acme-lib", "1.0.0", licenseId, null);
-            dao.applyToComponents(project.getId(), PURL, "org.acme", "acme-lib", "1.0.0", licenseId, null);
+            final long id = dao.upsert(project.getId(), PURL, "org.acme", "acme-lib", "1.0.0", override, null);
+            dao.applyToComponents(project.getId(), PURL, "org.acme", "acme-lib", "1.0.0", override, null);
             return id;
         });
     }

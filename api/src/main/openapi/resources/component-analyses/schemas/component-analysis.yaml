@@ -30,9 +30,18 @@ properties:
   license:
     type: string
     description: SPDX license ID or custom license name of the override
+  license_expression:
+    type: string
+    description: SPDX license expression of the override
+  license_name:
+    type: string
+    description: Free-text license name of the override
   declared_license:
     type: string
     description: The BOM-declared license the override replaced (snapshot from the last upload)
+  declared_license_kind:
+    type: string
+    description: "Which license slot the declared value used: `id` (a resolved SPDX or custom license), `name` (free text) or `expression` (an SPDX expression)"
   details:
     type: string
 required:

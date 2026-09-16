@@ -19,7 +19,6 @@
 package org.dependencytrack.resources.v2;
 
 import alpine.server.auth.PermissionRequired;
-import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
@@ -38,6 +37,7 @@ import org.dependencytrack.resources.AbstractApiResource;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -77,12 +77,8 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
         final long projectId = requireProjectId(request.getProjectUuid());
 
         try (final var qm = new QueryManager()) {
-            final Long licenseId;
-            if (request.getLicense() != null) {
-                licenseId = resolveLicense(qm, request.getLicense()).getId();
-            } else {
-                licenseId = null;
-            }
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
 
             final String commenter = getPrincipal().getName();
             inJdbiTransaction(handle -> {
@@ -93,14 +89,14 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 final long id = dao.upsert(
                         projectId, request.getPurl(), request.getGroup(),
                         request.getName(), request.getVersion(),
-                        licenseId, request.getDetails());
+                        override, request.getDetails());
                 final var comments = new ArrayList<CreateCommentCommand>();
-                final Long oldLicenseId = existing != null ? existing.licenseId() : null;
-                if (!Objects.equals(oldLicenseId, licenseId)) {
+                final LicenseOverride oldOverride = existing != null ? existing.override() : LicenseOverride.NONE;
+                if (!Objects.equals(oldOverride, override)) {
                     comments.add(new CreateCommentCommand(id, commenter,
                             "License override: %s → %s".formatted(
-                                    oldLicenseId != null ? licenseLabel(qm, oldLicenseId) : "not set",
-                                    request.getLicense() != null ? request.getLicense() : "not set")));
+                                    LicenseOverrideResolver.label(qm, oldOverride),
+                                    LicenseOverrideResolver.label(qm, override))));
                 }
                 final String oldDetails = existing != null ? existing.details() : null;
                 if (!Objects.equals(oldDetails, request.getDetails())) {
@@ -112,10 +108,10 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 if (!comments.isEmpty()) {
                     dao.createComments(comments);
                 }
-                if (licenseId != null) {
+                if (!override.isEmpty()) {
                     // first override on this component: snapshot the uploaded
                     // license so clearing can restore it instantly
-                    if (existing == null || existing.licenseId() == null) {
+                    if (oldOverride.isEmpty()) {
                         dao.getComponentLicense(
                                 projectId, request.getPurl(), request.getGroup(),
                                 request.getName(), request.getVersion())
@@ -126,9 +122,9 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                     dao.applyToComponents(
                             projectId, request.getPurl(), request.getGroup(),
                             request.getName(), request.getVersion(),
-                            licenseId, request.getDetails());
+                            override, request.getDetails());
                 } else {
-                    if (existing != null && existing.licenseId() != null) {
+                    if (!oldOverride.isEmpty()) {
                         dao.restoreDeclaredLicense(
                                 projectId, request.getPurl(), request.getGroup(),
                                 request.getName(), request.getVersion(),
@@ -139,7 +135,7 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                     dao.applyToComponents(
                             projectId, request.getPurl(), request.getGroup(),
                             request.getName(), request.getVersion(),
-                            /* licenseId */ null, request.getDetails());
+                            LicenseOverride.NONE, request.getDetails());
                 }
                 return null;
             });
@@ -220,22 +216,6 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     }
 
     /**
-     * Resolves an SPDX license ID or (custom) license name; 400 when unknown —
-     * overrides must reference licenses DT can attach to components.
-     */
-    private static License resolveLicense(final QueryManager qm, final String licenseIdOrName) {
-        final License license = qm.getLicenseByIdOrName(licenseIdOrName);
-        if (license != null && license != License.UNRESOLVED) {
-            return license;
-        }
-        final License customLicense = qm.getCustomLicenseByName(licenseIdOrName);
-        if (customLicense != null && customLicense != License.UNRESOLVED) {
-            return customLicense;
-        }
-        throw new BadRequestException("License %s is not known; create it as a custom license first".formatted(licenseIdOrName));
-    }
-
-    /**
      * Display label of a license: its SPDX ID, or the name for custom licenses.
      */
     private static String licenseLabel(final QueryManager qm, final long licenseId) {
@@ -251,12 +231,18 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
         final String licenseIdOrName = analysis.licenseId() != null
                 ? licenseLabel(qm, analysis.licenseId())
                 : null;
+        // the snapshot keeps the three slots apart; the response carries the
+        // value plus which slot it came from, since the policies judge an id,
+        // a name and an expression differently
         String declaredLicense = analysis.declaredLicenseExpression();
+        String declaredLicenseKind = declaredLicense != null ? "expression" : null;
         if (declaredLicense == null && analysis.declaredLicenseId() != null) {
             declaredLicense = licenseLabel(qm, analysis.declaredLicenseId());
+            declaredLicenseKind = "id";
         }
-        if (declaredLicense == null) {
+        if (declaredLicense == null && analysis.declaredLicenseName() != null) {
             declaredLicense = analysis.declaredLicenseName();
+            declaredLicenseKind = "name";
         }
         return org.dependencytrack.api.v2.model.ComponentAnalysis.builder()
                 .id(analysis.id())
@@ -265,7 +251,10 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 .name(analysis.name())
                 .version(analysis.version())
                 .license(licenseIdOrName)
+                .licenseExpression(analysis.licenseExpression())
+                .licenseName(analysis.licenseName())
                 .declaredLicense(declaredLicense)
+                .declaredLicenseKind(declaredLicenseKind)
                 .details(analysis.details())
                 .build();
     }

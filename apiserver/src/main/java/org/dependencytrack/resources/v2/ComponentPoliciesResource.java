@@ -32,6 +32,7 @@ import org.dependencytrack.api.v2.model.ListComponentPoliciesResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentPolicyRequest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.model.License;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.resources.AbstractApiResource;
@@ -72,12 +73,13 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     public Response createComponentPolicy(final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
-            final Long licenseId = resolveLicenseId(qm, request.getLicense());
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
             final long id = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
                     request.getName(), request.getDescription(), getPrincipal().getName(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
-                    request.getCondition(), licenseId, request.getDetails(),
+                    request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
                     request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
             return Response.created(uriInfo.getBaseUriBuilder()
@@ -93,12 +95,13 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     public Response updateComponentPolicy(final Long id, final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
-            final Long licenseId = resolveLicenseId(qm, request.getLicense());
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
             final boolean updated = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).update(
                     id, request.getName(), request.getDescription(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
-                    request.getCondition(), licenseId, request.getDetails(),
+                    request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
                     request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
             if (!updated) {
@@ -128,21 +131,6 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
         }
     }
 
-    private static Long resolveLicenseId(final QueryManager qm, final String licenseIdOrName) {
-        if (licenseIdOrName == null) {
-            return null;
-        }
-        final License license = qm.getLicenseByIdOrName(licenseIdOrName);
-        if (license != null && license != License.UNRESOLVED) {
-            return license.getId();
-        }
-        final License customLicense = qm.getCustomLicenseByName(licenseIdOrName);
-        if (customLicense != null && customLicense != License.UNRESOLVED) {
-            return customLicense.getId();
-        }
-        throw new BadRequestException("License %s is not known; create it as a custom license first".formatted(licenseIdOrName));
-    }
-
     private static ComponentPolicy mapPolicy(final QueryManager qm, final ComponentPolicyDao.ComponentPolicy policy) {
         String license = null;
         if (policy.licenseId() != null) {
@@ -160,6 +148,8 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
                 .priority(policy.priority())
                 .condition(policy.condition())
                 .license(license)
+                .licenseExpression(policy.licenseExpression())
+                .licenseName(policy.licenseName())
                 .details(policy.details())
                 .validFrom(policy.validFrom() != null
                         ? policy.validFrom().atOffset(java.time.ZoneOffset.UTC) : null)

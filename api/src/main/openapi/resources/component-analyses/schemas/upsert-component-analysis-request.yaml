@@ -31,7 +31,18 @@ properties:
     type: string
   license:
     type: string
-    description: SPDX license ID or custom license name
+    description: |-
+      SPDX license ID or custom license name of one resolved license.
+      Exactly one of license, license_expression and license_name may be set;
+      none clears the override.
+  license_expression:
+    type: string
+    description: |-
+      SPDX license expression; every operand must be a known SPDX ID or custom
+      license name. Curates a multi-license as a whole.
+  license_name:
+    type: string
+    description: Free-text license name, for a value no known license can express
   details:
     type: string
     description: Free-text curation note, written onto the component

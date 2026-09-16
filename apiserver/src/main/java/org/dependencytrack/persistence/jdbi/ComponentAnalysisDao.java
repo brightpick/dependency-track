@@ -43,6 +43,24 @@ public final class ComponentAnalysisDao {
         this.handle = handle;
     }
 
+    /**
+     * The license an analysis applies — exactly one of a resolved license
+     * (incl. custom licenses), an SPDX expression, or a free-text name,
+     * mirroring the component's three license slots. {@link #NONE} carries
+     * no license override (details only).
+     */
+    public record LicenseOverride(
+            @Nullable Long licenseId,
+            @Nullable String licenseExpression,
+            @Nullable String licenseName) {
+
+        public static final LicenseOverride NONE = new LicenseOverride(null, null, null);
+
+        public boolean isEmpty() {
+            return licenseId == null && licenseExpression == null && licenseName == null;
+        }
+    }
+
     public record ComponentAnalysis(
             long id,
             long projectId,
@@ -51,11 +69,17 @@ public final class ComponentAnalysisDao {
             String name,
             @Nullable String version,
             @Nullable Long licenseId,
+            @Nullable String licenseExpression,
+            @Nullable String licenseName,
             @Nullable Long declaredLicenseId,
             @Nullable String declaredLicenseName,
             @Nullable String declaredLicenseExpression,
             @Nullable String details,
             @Nullable Long policyId) {
+
+        public LicenseOverride override() {
+            return new LicenseOverride(licenseId, licenseExpression, licenseName);
+        }
     }
 
     public record ComponentAnalysisComment(
@@ -65,6 +89,13 @@ public final class ComponentAnalysisDao {
             String comment) {
     }
 
+    private static final String ANALYSIS_COLUMNS = """
+            "ID", "PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
+            "LICENSE_ID", "LICENSE_EXPRESSION", "LICENSE_NAME",
+            "DECLARED_LICENSE_ID", "DECLARED_LICENSE_NAME",
+            "DECLARED_LICENSE_EXPRESSION", "DETAILS", "POLICY_ID"
+            """;
+
     private static final RowMapper<ComponentAnalysis> ANALYSIS_ROW_MAPPER = (rs, ctx) -> new ComponentAnalysis(
             rs.getLong("ID"),
             rs.getLong("PROJECT_ID"),
@@ -73,6 +104,8 @@ public final class ComponentAnalysisDao {
             rs.getString("NAME"),
             rs.getString("VERSION"),
             rs.getObject("LICENSE_ID", Long.class),
+            rs.getString("LICENSE_EXPRESSION"),
+            rs.getString("LICENSE_NAME"),
             rs.getObject("DECLARED_LICENSE_ID", Long.class),
             rs.getString("DECLARED_LICENSE_NAME"),
             rs.getString("DECLARED_LICENSE_EXPRESSION"),
@@ -90,12 +123,10 @@ public final class ComponentAnalysisDao {
      */
     public List<ComponentAnalysis> getAllByProject(final long projectId) {
         return handle.createQuery("""
-                        SELECT "ID", "PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
-                               "LICENSE_ID", "DECLARED_LICENSE_ID", "DECLARED_LICENSE_NAME",
-                               "DECLARED_LICENSE_EXPRESSION", "DETAILS", "POLICY_ID"
+                        SELECT %s
                           FROM "COMPONENT_ANALYSIS"
                          WHERE "PROJECT_ID" = :projectId
-                        """)
+                        """.formatted(ANALYSIS_COLUMNS))
                 .bind("projectId", projectId)
                 .map(ANALYSIS_ROW_MAPPER)
                 .list();
@@ -103,12 +134,10 @@ public final class ComponentAnalysisDao {
 
     public Optional<ComponentAnalysis> getById(final long analysisId) {
         return handle.createQuery("""
-                        SELECT "ID", "PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
-                               "LICENSE_ID", "DECLARED_LICENSE_ID", "DECLARED_LICENSE_NAME",
-                               "DECLARED_LICENSE_EXPRESSION", "DETAILS", "POLICY_ID"
+                        SELECT %s
                           FROM "COMPONENT_ANALYSIS"
                          WHERE "ID" = :id
-                        """)
+                        """.formatted(ANALYSIS_COLUMNS))
                 .bind("id", analysisId)
                 .map(ANALYSIS_ROW_MAPPER)
                 .findOne();
@@ -121,16 +150,14 @@ public final class ComponentAnalysisDao {
             final String name,
             @Nullable final String version) {
         return handle.createQuery("""
-                        SELECT "ID", "PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
-                               "LICENSE_ID", "DECLARED_LICENSE_ID", "DECLARED_LICENSE_NAME",
-                               "DECLARED_LICENSE_EXPRESSION", "DETAILS", "POLICY_ID"
+                        SELECT %s
                           FROM "COMPONENT_ANALYSIS"
                          WHERE "PROJECT_ID" = :projectId
                            AND COALESCE("PURL", '') = COALESCE(:purl, '')
                            AND COALESCE("GROUP", '') = COALESCE(:group, '')
                            AND "NAME" = :name
                            AND COALESCE("VERSION", '') = COALESCE(:version, '')
-                        """)
+                        """.formatted(ANALYSIS_COLUMNS))
                 .bind("projectId", projectId)
                 .bind("purl", purl)
                 .bind("group", group)
@@ -149,19 +176,21 @@ public final class ComponentAnalysisDao {
             @Nullable final String group,
             final String name,
             @Nullable final String version,
-            @Nullable final Long licenseId,
+            final LicenseOverride override,
             @Nullable final String details) {
         return handle.createQuery("""
                         INSERT INTO "COMPONENT_ANALYSIS"
                           ("PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
-                           "LICENSE_ID", "DETAILS")
+                           "LICENSE_ID", "LICENSE_EXPRESSION", "LICENSE_NAME", "DETAILS")
                         VALUES
                           (:projectId, :purl, :group, :name, :version,
-                           :licenseId, :details)
+                           :licenseId, :licenseExpression, :licenseName, :details)
                         ON CONFLICT ("PROJECT_ID", COALESCE("PURL", ''), COALESCE("GROUP", ''),
                                      "NAME", COALESCE("VERSION", ''))
                         DO UPDATE
                            SET "LICENSE_ID" = EXCLUDED."LICENSE_ID"
+                             , "LICENSE_EXPRESSION" = EXCLUDED."LICENSE_EXPRESSION"
+                             , "LICENSE_NAME" = EXCLUDED."LICENSE_NAME"
                              , "DETAILS" = EXCLUDED."DETAILS"
                              , "POLICY_ID" = NULL
                              , "UPDATED_AT" = NOW()
@@ -172,7 +201,9 @@ public final class ComponentAnalysisDao {
                 .bind("group", group)
                 .bind("name", name)
                 .bind("version", version)
-                .bind("licenseId", licenseId)
+                .bind("licenseId", override.licenseId())
+                .bind("licenseExpression", override.licenseExpression())
+                .bind("licenseName", override.licenseName())
                 .bind("details", details)
                 .mapTo(Long.class)
                 .one();
@@ -181,8 +212,8 @@ public final class ComponentAnalysisDao {
     /**
      * Applies an analysis to the project's currently matching component rows
      * (the ingest hook does the same on every later BOM upload). Details are
-     * written to the component notes; a license override also clears a
-     * BOM-declared multi-license expression.
+     * written to the component notes; a license override fills its slot,
+     * clears the other two, and marks the component's license as curated.
      */
     public int applyToComponents(
             final long projectId,
@@ -190,15 +221,15 @@ public final class ComponentAnalysisDao {
             @Nullable final String group,
             final String name,
             @Nullable final String version,
-            @Nullable final Long licenseId,
+            final LicenseOverride override,
             @Nullable final String details) {
         return handle.createUpdate("""
                         UPDATE "COMPONENT"
-                           SET "LICENSE_ID" = COALESCE(:licenseId, "LICENSE_ID")
-                             , "LICENSE_EXPRESSION" = CASE WHEN :licenseId IS NULL
-                                                           THEN "LICENSE_EXPRESSION" ELSE NULL END
-                             , "LICENSE_CURATED" = CASE WHEN :licenseId IS NULL
-                                                        THEN "LICENSE_CURATED" ELSE TRUE END
+                           SET "LICENSE_ID" = CASE WHEN :apply THEN :licenseId ELSE "LICENSE_ID" END
+                             , "LICENSE_EXPRESSION" = CASE WHEN :apply THEN :licenseExpression
+                                                           ELSE "LICENSE_EXPRESSION" END
+                             , "LICENSE" = CASE WHEN :apply THEN :licenseName ELSE "LICENSE" END
+                             , "LICENSE_CURATED" = CASE WHEN :apply THEN TRUE ELSE "LICENSE_CURATED" END
                              , "TEXT" = COALESCE(:details, "TEXT")
                          WHERE "PROJECT_ID" = :projectId
                            AND COALESCE("PURL", '') = COALESCE(:purl, '')
@@ -211,7 +242,10 @@ public final class ComponentAnalysisDao {
                 .bind("group", group)
                 .bind("name", name)
                 .bind("version", version)
-                .bind("licenseId", licenseId)
+                .bind("apply", !override.isEmpty())
+                .bind("licenseId", override.licenseId())
+                .bind("licenseExpression", override.licenseExpression())
+                .bind("licenseName", override.licenseName())
                 .bind("details", details)
                 .execute();
     }
@@ -324,20 +358,22 @@ public final class ComponentAnalysisDao {
             @Nullable final String group,
             final String name,
             @Nullable final String version,
-            @Nullable final Long licenseId,
+            final LicenseOverride override,
             @Nullable final String details,
             final long policyId) {
         return handle.createQuery("""
                         INSERT INTO "COMPONENT_ANALYSIS"
                           ("PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
-                           "LICENSE_ID", "DETAILS", "POLICY_ID")
+                           "LICENSE_ID", "LICENSE_EXPRESSION", "LICENSE_NAME", "DETAILS", "POLICY_ID")
                         VALUES
                           (:projectId, :purl, :group, :name, :version,
-                           :licenseId, :details, :policyId)
+                           :licenseId, :licenseExpression, :licenseName, :details, :policyId)
                         ON CONFLICT ("PROJECT_ID", COALESCE("PURL", ''), COALESCE("GROUP", ''),
                                      "NAME", COALESCE("VERSION", ''))
                         DO UPDATE
                            SET "LICENSE_ID" = EXCLUDED."LICENSE_ID"
+                             , "LICENSE_EXPRESSION" = EXCLUDED."LICENSE_EXPRESSION"
+                             , "LICENSE_NAME" = EXCLUDED."LICENSE_NAME"
                              , "DETAILS" = EXCLUDED."DETAILS"
                              , "POLICY_ID" = EXCLUDED."POLICY_ID"
                              , "UPDATED_AT" = NOW()
@@ -349,7 +385,9 @@ public final class ComponentAnalysisDao {
                 .bind("group", group)
                 .bind("name", name)
                 .bind("version", version)
-                .bind("licenseId", licenseId)
+                .bind("licenseId", override.licenseId())
+                .bind("licenseExpression", override.licenseExpression())
+                .bind("licenseName", override.licenseName())
                 .bind("details", details)
                 .bind("policyId", policyId)
                 .mapTo(Long.class)
