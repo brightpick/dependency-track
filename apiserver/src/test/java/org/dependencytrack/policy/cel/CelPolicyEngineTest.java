@@ -428,6 +428,35 @@ class CelPolicyEngineTest extends PersistenceCapableTest {
     }
 
     @Test
+    void testEvaluateProjectWithLicenseCuratedComponent() {
+        final var policy = qm.createPolicy("policy", Policy.Operator.ANY, Policy.ViolationState.FAIL);
+        qm.createPolicyCondition(policy, PolicyCondition.Subject.EXPRESSION, PolicyCondition.Operator.MATCHES, """
+                component.license_name != "" && !component.license_curated
+                """, PolicyViolation.Type.LICENSE);
+
+        final var project = new Project();
+        project.setName("acme-app");
+        qm.persist(project);
+
+        final var declaredComponent = new Component();
+        declaredComponent.setProject(project);
+        declaredComponent.setName("acme-lib-declared");
+        declaredComponent.setLicense("Unknown License");
+        qm.persist(declaredComponent);
+
+        final var curatedComponent = new Component();
+        curatedComponent.setProject(project);
+        curatedComponent.setName("acme-lib-curated");
+        curatedComponent.setLicense("Unknown License");
+        curatedComponent.setLicenseCurated(true);
+        qm.persist(curatedComponent);
+
+        new CelPolicyEngine().evaluateProject(project.getUuid());
+        assertThat(qm.getAllPolicyViolations(declaredComponent)).hasSize(1);
+        assertThat(qm.getAllPolicyViolations(curatedComponent)).isEmpty();
+    }
+
+    @Test
     void testEvaluateProjectWithPolicyOperatorForComponentAgeLessThan() throws Exception {
         final var policy = qm.createPolicy("policy", Policy.Operator.ANY, Policy.ViolationState.FAIL);
         qm.createPolicyCondition(policy, PolicyCondition.Subject.EXPRESSION, PolicyCondition.Operator.MATCHES, """

@@ -53,6 +53,7 @@ public final class CelPolicyFieldMappingRegistry {
             new FieldMapping("blake3", "c.\"BLAKE3\""),
             new FieldMapping("license_name", "c.\"LICENSE\""),
             new FieldMapping("license_expression", "c.\"LICENSE_EXPRESSION\""),
+            new FieldMapping("license_curated", "c.\"LICENSE_CURATED\""),
             new FieldMapping("published_at", "pam.\"PUBLISHED_AT\""),
             new FieldMapping("latest_version", "pm.\"LATEST_VERSION\""),
             new FieldMapping("latest_version_published_at", "pm.\"LATEST_VERSION_PUBLISHED_AT\""),

@@ -117,6 +117,7 @@ public final class CelComponentPolicyApplier {
                 builder.setSwidTagId(component.getSwidTagId());
             }
             builder.setIsInternal(component.isInternal());
+            builder.setLicenseCurated(component.isLicenseCurated());
             if (component.getLicense() != null) {
                 builder.setLicenseName(component.getLicense());
             }

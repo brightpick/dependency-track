@@ -150,11 +150,24 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     @Override
     @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
     public Response deleteComponentAnalysis(final Long id) {
-        final boolean deleted = inJdbiTransaction(
-                handle -> new ComponentAnalysisDao(handle).delete(id));
-        if (!deleted) {
-            throw new NotFoundException();
-        }
+        final ComponentAnalysis analysis = requireAnalysis(id);
+        inJdbiTransaction(handle -> {
+            final var dao = new ComponentAnalysisDao(handle);
+            // the component carries the uploaded license again, not the deleted
+            // decision — also when the decision's license has since left the
+            // catalogue, which empties the override but not the snapshot
+            if (analysis.declaredLicenseId() != null || analysis.declaredLicenseName() != null
+                    || analysis.declaredLicenseExpression() != null) {
+                dao.restoreDeclaredLicense(
+                        analysis.projectId(), analysis.purl(), analysis.group(),
+                        analysis.name(), analysis.version(),
+                        analysis.declaredLicenseId(),
+                        analysis.declaredLicenseName(),
+                        analysis.declaredLicenseExpression());
+            }
+            dao.delete(analysis.id());
+            return null;
+        });
         return Response.noContent().build();
     }
 
@@ -186,6 +199,11 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                         .path("/comments")
                         .build())
                 .build();
+    }
+
+    private static ComponentAnalysis requireAnalysis(final long id) {
+        return withJdbiHandle(handle -> new ComponentAnalysisDao(handle).getById(id))
+                .orElseThrow(NotFoundException::new);
     }
 
     private static long requireProjectId(final UUID uuid) {

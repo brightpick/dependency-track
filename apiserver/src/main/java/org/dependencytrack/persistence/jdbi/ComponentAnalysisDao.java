@@ -101,6 +101,19 @@ public final class ComponentAnalysisDao {
                 .list();
     }
 
+    public Optional<ComponentAnalysis> getById(final long analysisId) {
+        return handle.createQuery("""
+                        SELECT "ID", "PROJECT_ID", "PURL", "GROUP", "NAME", "VERSION",
+                               "LICENSE_ID", "DECLARED_LICENSE_ID", "DECLARED_LICENSE_NAME",
+                               "DECLARED_LICENSE_EXPRESSION", "DETAILS", "POLICY_ID"
+                          FROM "COMPONENT_ANALYSIS"
+                         WHERE "ID" = :id
+                        """)
+                .bind("id", analysisId)
+                .map(ANALYSIS_ROW_MAPPER)
+                .findOne();
+    }
+
     public Optional<ComponentAnalysis> getByIdentity(
             final long projectId,
             @Nullable final String purl,
@@ -184,6 +197,8 @@ public final class ComponentAnalysisDao {
                            SET "LICENSE_ID" = COALESCE(:licenseId, "LICENSE_ID")
                              , "LICENSE_EXPRESSION" = CASE WHEN :licenseId IS NULL
                                                            THEN "LICENSE_EXPRESSION" ELSE NULL END
+                             , "LICENSE_CURATED" = CASE WHEN :licenseId IS NULL
+                                                        THEN "LICENSE_CURATED" ELSE TRUE END
                              , "TEXT" = COALESCE(:details, "TEXT")
                          WHERE "PROJECT_ID" = :projectId
                            AND COALESCE("PURL", '') = COALESCE(:purl, '')
@@ -242,6 +257,7 @@ public final class ComponentAnalysisDao {
                            SET "LICENSE_ID" = :declaredLicenseId
                              , "LICENSE" = :declaredLicenseName
                              , "LICENSE_EXPRESSION" = :declaredLicenseExpression
+                             , "LICENSE_CURATED" = FALSE
                          WHERE "PROJECT_ID" = :projectId
                            AND COALESCE("PURL", '') = COALESCE(:purl, '')
                            AND COALESCE("GROUP", '') = COALESCE(:group, '')

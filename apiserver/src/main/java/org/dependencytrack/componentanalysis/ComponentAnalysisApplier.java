@@ -101,6 +101,7 @@ public final class ComponentAnalysisApplier {
                 });
                 component.setResolvedLicense(license);
                 component.setLicenseExpression(null);
+                component.setLicenseCurated(true);
             } else {
                 LOGGER.warn("Component analysis {} references a license that no longer exists; skipping license override", analysis.id());
             }

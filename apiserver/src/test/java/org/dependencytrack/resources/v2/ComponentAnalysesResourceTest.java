@@ -36,6 +36,7 @@ import java.util.UUID;
 
 import static net.javacrumbs.jsonunit.assertj.JsonAssertions.assertThatJson;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.dependencytrack.persistence.jdbi.JdbiFactory.useJdbiHandle;
 import static org.assertj.core.api.Assertions.fail;
 
 class ComponentAnalysesResourceTest extends ResourceTest {
@@ -123,6 +124,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         final Component updatedComponent = qm.getObjectByUuid(Component.class, component.getUuid());
         assertThat(updatedComponent.getResolvedLicense()).isNotNull();
         assertThat(updatedComponent.getResolvedLicense().getId()).isEqualTo(apache.getId());
+        assertThat(updatedComponent.isLicenseCurated()).isTrue();
         assertThat(updatedComponent.getNotes()).isEqualTo("curated");
     }
 
@@ -265,6 +267,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         final Component restoredComponent = qm.getObjectByUuid(Component.class, component.getUuid());
         assertThat(restoredComponent.getResolvedLicense()).isNull();
         assertThat(restoredComponent.getLicense()).isEqualTo("Proprietary Foo");
+        assertThat(restoredComponent.isLicenseCurated()).isFalse();
 
         final Response commentsResponse = getComments(analysisId);
         assertThat(commentsResponse.getStatus()).isEqualTo(200);
@@ -377,6 +380,86 @@ class ComponentAnalysesResourceTest extends ResourceTest {
         final Response response = listAnalyses(project.getUuid());
 
         assertThat(response.getStatus()).isEqualTo(403);
+    }
+
+    @Test
+    void deletingAnAnalysisWhoseLicenseLeftTheCatalogueStillRestoresTheUpload() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+        assertThat(upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license": "Apache-2.0"
+                }
+                """.formatted(project.getUuid())).getStatus()).isEqualTo(204);
+        final long analysisId = getAnalysisFromList(project.getUuid(), "acme-lib").getJsonNumber("id").longValue();
+
+        // the curated license leaves the catalogue: its foreign keys go NULL, the
+        // component stays flagged as curated with no license at all
+        useJdbiHandle(handle -> {
+            handle.createUpdate("UPDATE \"COMPONENT_ANALYSIS\" SET \"LICENSE_ID\" = NULL WHERE \"ID\" = :id")
+                    .bind("id", analysisId).execute();
+            handle.createUpdate("UPDATE \"COMPONENT\" SET \"LICENSE_ID\" = NULL WHERE \"UUID\" = :uuid")
+                    .bind("uuid", component.getUuid()).execute();
+        });
+
+        assertThat(jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(204);
+
+        qm.getPersistenceManager().evictAll();
+        final Component reloaded = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(reloaded.getResolvedLicense()).isNull();
+        assertThat(reloaded.getLicense()).isEqualTo("Unknown License");
+        assertThat(reloaded.isLicenseCurated()).isFalse();
+    }
+
+    @Test
+    void deletingAnAnalysisRestoresTheUploadedLicense() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        final License apache = createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+        final String body = /* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license": "%s"
+                }
+                """;
+
+        assertThat(upsertAnalysis(body.formatted(project.getUuid(), "MIT")).getStatus()).isEqualTo(204);
+        final long analysisId = getAnalysisFromList(project.getUuid(), "acme-lib").getJsonNumber("id").longValue();
+
+        final Response deleted = jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete();
+        assertThat(deleted.getStatus()).isEqualTo(204);
+
+        // the component carries the uploaded value again, and is not curated
+        qm.getPersistenceManager().evictAll();
+        Component reloaded = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(reloaded.getResolvedLicense()).isNull();
+        assertThat(reloaded.getLicense()).isEqualTo("Unknown License");
+        assertThat(reloaded.isLicenseCurated()).isFalse();
+
+        // a later override snapshots the uploaded value, not the deleted decision
+        assertThat(upsertAnalysis(body.formatted(project.getUuid(), "Apache-2.0")).getStatus()).isEqualTo(204);
+        final JsonObject analysis = getAnalysisFromList(project.getUuid(), "acme-lib");
+        assertThat(analysis.getString("declared_license")).isEqualTo("Unknown License");
+        qm.getPersistenceManager().evictAll();
+        reloaded = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(reloaded.getResolvedLicense().getId()).isEqualTo(apache.getId());
+        assertThat(reloaded.isLicenseCurated()).isTrue();
+
+        assertThat(jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(404);
     }
 
     private Response upsertAnalysis(final String requestBody) {

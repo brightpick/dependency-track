@@ -181,6 +181,7 @@ public class CelPolicyDaoTest extends PersistenceCapableTest {
         component.setBlake3("componentBlake3");
         component.setLicense("componentLicenseName");
         component.setLicenseExpression("componentLicenseExpression");
+        component.setLicenseCurated(true);
         component.setResolvedLicense(license);
         qm.persist(component);
 
@@ -249,6 +250,7 @@ public class CelPolicyDaoTest extends PersistenceCapableTest {
                           "blake3": "componentBlake3",
                           "licenseName": "componentLicenseName",
                           "licenseExpression": "componentLicenseExpression",
+                          "licenseCurated": true,
                           "latestVersion": "1.0.0",
                           "publishedAt": "1970-01-01T00:00:00.222Z"
                         }
