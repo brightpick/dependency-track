@@ -31,6 +31,7 @@ import org.dependencytrack.api.v2.model.ComponentPolicy;
 import org.dependencytrack.api.v2.model.ListComponentPoliciesResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentPolicyRequest;
 import org.dependencytrack.auth.Permissions;
+import org.dependencytrack.exception.AlreadyExistsException;
 import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.dependencytrack.persistence.QueryManager;
@@ -41,9 +42,11 @@ import org.dependencytrack.policy.cel.CelPolicyType;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.inJdbiTransaction;
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.withJdbiHandle;
+import static org.dependencytrack.util.PersistenceUtil.isUniqueConstraintViolation;
 
 /**
  * REST resource for component policies (automated license curation rules).
@@ -80,13 +83,17 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
         try (final var qm = new QueryManager()) {
             final LicenseOverride override = LicenseOverrideResolver.resolve(
                     qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
-            final long id = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+            final long id = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
+                final var dao = new ComponentPolicyDao(handle);
+                requireNameFree(dao, request.getName(), null);
+                return dao.create(
                     request.getName(), request.getDescription(), getPrincipal().getName(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
                     request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
-                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
+                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null);
+            }));
             return Response.created(uriInfo.getBaseUriBuilder()
                             .path("/component-policies")
                             .path(String.valueOf(id))
@@ -102,13 +109,17 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
         try (final var qm = new QueryManager()) {
             final LicenseOverride override = LicenseOverrideResolver.resolve(
                     qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
-            final boolean updated = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).update(
+            final boolean updated = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
+                final var dao = new ComponentPolicyDao(handle);
+                requireNameFree(dao, request.getName(), id);
+                return dao.update(
                     id, request.getName(), request.getDescription(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
                     request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
-                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
+                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null);
+            }));
             if (!updated) {
                 throw new NotFoundException();
             }
@@ -125,6 +136,34 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
             throw new NotFoundException();
         }
         return Response.noContent().build();
+    }
+
+    /**
+     * Two requests may pass the name check together; the unique index then
+     * rejects the later one — still a 409 on the name, not a database error.
+     */
+    private static <T> T orNameConflict(final String name, final Supplier<T> action) {
+        try {
+            return action.get();
+        } catch (RuntimeException e) {
+            if (isUniqueConstraintViolation(e)) {
+                throw new AlreadyExistsException(
+                        "A component policy named \"%s\" already exists".formatted(name), e);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Policy names are unique; a taken name is a 409 naming the name, not a
+     * database error.
+     */
+    private static void requireNameFree(final ComponentPolicyDao dao, final String name, final Long ownId) {
+        final Long holder = dao.idByName(name).orElse(null);
+        if (holder != null && !holder.equals(ownId)) {
+            throw new AlreadyExistsException(
+                    "A component policy named \"%s\" already exists".formatted(name));
+        }
     }
 
     private static void validateCondition(final String condition) {

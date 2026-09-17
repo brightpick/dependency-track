@@ -124,6 +124,40 @@ class ComponentPoliciesResourceTest extends ResourceTest {
     }
 
     @Test
+    void shouldRejectATakenPolicyNameWithConflict() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final String body = /* language=JSON */ """
+                {
+                  "name": "curation pkg:pypi/acme@1",
+                  "condition": "component.purl == \\"pkg:pypi/acme@1\\"",
+                  "license": "Apache-2.0",
+                  "enabled": true,
+                  "priority": 50
+                }
+                """;
+        final Response first = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body));
+        assertThat(first.getStatus()).isEqualTo(201);
+
+        // the same name again — the button in the audit panel clicked twice
+        final Response second = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body));
+        assertThat(second.getStatus()).isEqualTo(409);
+        assertThatJson(getPlainTextBody(second))
+                .node("detail").isString().contains("curation pkg:pypi/acme@1");
+
+        // renaming another policy onto the taken name is the same conflict
+        final Response other = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body.replace("curation pkg:pypi/acme@1", "other")));
+        assertThat(other.getStatus()).isEqualTo(201);
+        final String otherId = other.getLocation().getPath().replaceAll(".*/", "");
+        final Response renamed = jersey.target("/component-policies/" + otherId).request()
+                .header(X_API_KEY, apiKey).put(Entity.json(body));
+        assertThat(renamed.getStatus()).isEqualTo(409);
+    }
+
+    @Test
     void shouldRejectCreateWithInvalidCelCondition() {
         initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
 

@@ -102,6 +102,18 @@ public final class ComponentPolicyDao {
                 .list();
     }
 
+    /**
+     * The id of the policy carrying this name — names are unique.
+     */
+    public Optional<Long> idByName(final String name) {
+        return handle.createQuery("""
+                        SELECT "ID" FROM "COMPONENT_POLICY" WHERE "NAME" = :name
+                        """)
+                .bind("name", name)
+                .mapTo(Long.class)
+                .findOne();
+    }
+
     public Optional<ComponentPolicy> getById(final long id) {
         return handle.createQuery(SELECT + " WHERE \"ID\" = :id")
                 .bind("id", id)
