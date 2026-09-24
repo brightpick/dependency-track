@@ -46,6 +46,7 @@ import java.util.stream.Stream;
 
 import static org.dependencytrack.persistence.jdbi.mapping.RowMapperUtil.maybeSet;
 import static org.dependencytrack.policy.cel.CelPolicyTypes.TYPE_COMPONENT;
+import static org.dependencytrack.policy.cel.CelPolicyTypes.TYPE_COMPONENT_PROPERTY;
 import static org.dependencytrack.policy.cel.CelPolicyTypes.TYPE_PROJECT;
 import static org.dependencytrack.policy.cel.CelPolicyTypes.TYPE_PROJECT_METADATA;
 import static org.dependencytrack.policy.cel.CelPolicyTypes.TYPE_PROJECT_PROPERTY;
@@ -676,6 +677,27 @@ public final class CelPolicyDao {
 
         final List<String> fetchColumns = new ArrayList<>(selectColumns(COMPONENT_FIELDS, componentRequirements));
 
+        // Component properties live in their own table, so they are aggregated
+        // per component the way project properties are; without this a policy
+        // condition reading component.properties silently sees an empty list.
+        final var propertyColumns = new ArrayList<String>();
+        final boolean needsProperties = componentRequirements.contains("properties");
+        if (needsProperties) {
+            fetchColumns.add("properties");
+            if (requirements.containsKey(TYPE_COMPONENT_PROPERTY)) {
+                COMPONENT_PROPERTY_FIELDS.stream()
+                        .filter(f -> requirements.get(TYPE_COMPONENT_PROPERTY).contains(f.protoFieldName()))
+                        .map(f -> "'%s', %s".formatted(f.protoFieldName(), f.sqlExpression()))
+                        .forEach(propertyColumns::add);
+            }
+
+            // Always include ID to ensure DISTINCT produces correct cardinality,
+            // even when no specific property fields are accessed.
+            if (propertyColumns.isEmpty()) {
+                propertyColumns.add("'_id', cp.\"ID\"");
+            }
+        }
+
         final boolean shouldJoinPm =
                 componentRequirements.contains("latest_version")
                         || componentRequirements.contains("latest_version_published_at");
@@ -692,6 +714,8 @@ public final class CelPolicyDao {
                         <#-- @ftlvariable name="fetchColumns" type="java.util.Collection<String>" -->
                         <#-- @ftlvariable name="shouldJoinPam" type="boolean" -->
                         <#-- @ftlvariable name="shouldJoinPm" type="boolean" -->
+                        <#-- @ftlvariable name="needsProperties" type="boolean" -->
+                        <#-- @ftlvariable name="propertyColumns" type="java.util.Collection<String>" -->
                         SELECT c."ID" AS db_id
                         <#if fetchColumns?size gt 0>
                              , ${fetchColumns?join(", ")}
@@ -705,11 +729,20 @@ public final class CelPolicyDao {
                           LEFT JOIN "PACKAGE_METADATA" AS pm
                             ON pm."PURL" = pam."PACKAGE_PURL"
                         </#if>
+                        <#if needsProperties!false>
+                          LEFT JOIN LATERAL (
+                            SELECT CAST(JSONB_AGG(DISTINCT JSONB_BUILD_OBJECT(${propertyColumns?join(", ")})) AS TEXT) AS properties
+                              FROM "COMPONENT_PROPERTY" AS cp
+                             WHERE cp."COMPONENT_ID" = c."ID"
+                          ) AS properties_sub ON TRUE
+                        </#if>
                          WHERE c."ID" = ANY(:ids)
                         """)
                 .define("fetchColumns", fetchColumns)
                 .define("shouldJoinPam", shouldJoinPam)
                 .define("shouldJoinPm", shouldJoinPm)
+                .define("needsProperties", needsProperties)
+                .define("propertyColumns", propertyColumns)
                 .bindArray("ids", Long.class, componentIds)
                 .reduceResultSet(new HashMap<>(), (accumulator, rs, ctx) -> {
                     final long dbId = rs.getLong("db_id");

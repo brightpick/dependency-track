@@ -18,14 +18,25 @@
  */
 package org.dependencytrack.policy.cel.persistence;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.google.protobuf.util.JsonFormat;
+import org.dependencytrack.common.Mappers;
 import org.dependencytrack.persistence.jdbi.mapping.RowMapperUtil;
 import org.dependencytrack.proto.policy.v1.Component;
 import org.jdbi.v3.core.mapper.RowMapper;
+import org.jdbi.v3.core.result.UnableToProduceResultException;
 import org.jdbi.v3.core.statement.StatementContext;
 
+import java.io.IOException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
+import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.dependencytrack.persistence.jdbi.mapping.RowMapperUtil.maybeSet;
 
 public final class CelPolicyComponentRowMapper implements RowMapper<Component> {
@@ -63,6 +74,41 @@ public final class CelPolicyComponentRowMapper implements RowMapper<Component> {
         maybeSet(rs, "package_artifact_sha1", ResultSet::getString, builder::setPackageArtifactSha1);
         maybeSet(rs, "package_artifact_sha256", ResultSet::getString, builder::setPackageArtifactSha256);
         maybeSet(rs, "package_artifact_sha512", ResultSet::getString, builder::setPackageArtifactSha512);
+        maybeSet(rs, "properties", CelPolicyComponentRowMapper::maybeConvertProperties, builder::addAllProperties);
         return builder.build();
+    }
+
+    private static final JsonFormat.Parser PROPERTY_JSON_PARSER =
+            JsonFormat.parser().ignoringUnknownFields();
+
+    private static List<Component.Property> maybeConvertProperties(
+            final ResultSet rs, final String columnName) throws SQLException {
+        final String jsonString = rs.getString(columnName);
+        if (isBlank(jsonString)) {
+            return Collections.emptyList();
+        }
+
+        // Protobuf's JsonFormat.Parser can't deserialize JSON arrays, so the
+        // aggregated array is walked with Jackson and each object parsed alone.
+        final var properties = new ArrayList<Component.Property>();
+        try (final JsonParser jsonParser = Mappers.jsonMapper().createParser(jsonString)) {
+            if (jsonParser.nextToken() != JsonToken.START_ARRAY) {
+                return Collections.emptyList();
+            }
+
+            while (jsonParser.nextToken() != JsonToken.END_ARRAY) {
+                if (jsonParser.currentToken() == JsonToken.START_OBJECT) {
+                    final JsonNode objectNode = jsonParser.readValueAsTree();
+                    final var propertyBuilder = Component.Property.newBuilder();
+                    PROPERTY_JSON_PARSER.merge(objectNode.toString(), propertyBuilder);
+                    properties.add(propertyBuilder.build());
+                } else {
+                    jsonParser.skipChildren();
+                }
+            }
+        } catch (IOException e) {
+            throw new UnableToProduceResultException(e);
+        }
+        return properties;
     }
 }
