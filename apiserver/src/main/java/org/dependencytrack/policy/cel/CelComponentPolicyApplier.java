@@ -23,6 +23,7 @@ import com.google.protobuf.util.Timestamps;
 import dev.cel.common.CelValidationException;
 import dev.cel.runtime.CelEvaluationException;
 import org.dependencytrack.model.Component;
+import org.dependencytrack.model.ComponentProperty;
 import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
@@ -135,6 +136,27 @@ public final class CelComponentPolicyApplier {
                     licenseBuilder.setName(resolvedLicense.getName());
                 }
                 builder.setResolvedLicense(licenseBuilder);
+            }
+            // Properties come from the BOM and are synchronized onto the
+            // component before this runs; a condition may pin them, so a
+            // curation rule expires when its inputs change.
+            final List<ComponentProperty> properties = component.getProperties();
+            if (properties != null) {
+                for (final ComponentProperty property : properties) {
+                    if (property.getPropertyName() == null) {
+                        continue;
+                    }
+                    final var propertyBuilder = org.dependencytrack.proto.policy.v1.Component.Property.newBuilder()
+                            .setGroup(Objects.requireNonNullElse(property.getGroupName(), ""))
+                            .setName(property.getPropertyName());
+                    if (property.getPropertyValue() != null) {
+                        propertyBuilder.setValue(property.getPropertyValue());
+                    }
+                    if (property.getPropertyType() != null) {
+                        propertyBuilder.setType(property.getPropertyType().name());
+                    }
+                    builder.addProperties(propertyBuilder);
+                }
             }
             protoComponentsById.put(component.getId(), builder.build());
         }
