@@ -664,6 +664,106 @@ class InternalVulnAnalyzerTest {
 
     }
 
+    @Nested
+    class SourcePackageMatchingTest {
+
+        private static final Range ALPINE_OPENSSL_RANGE = withRange().havingEndExcluding("3.5.8-r0");
+        private static final Range DEBIAN_GCC_DEFAULTS_RANGE = withRange().havingEndExcluding("1.204");
+
+        private static Collection<Arguments> parameters() {
+            return Arrays.asList(
+                    // ---
+                    // Alpine: libssl3 is built from openssl, same version
+                    // ---
+                    Arguments.of("pkg:apk/alpine/openssl?arch=source&distro=alpine-3.24", ALPINE_OPENSSL_RANGE, MATCHES,
+                            "pkg:apk/alpine/libssl3@3.5.7-r0?arch=x86_64&distro=alpine-3.24.1&upstream=openssl"),
+                    Arguments.of("pkg:apk/alpine/openssl?arch=source&distro=alpine-3.24", ALPINE_OPENSSL_RANGE, DOES_NOT_MATCH,
+                            "pkg:apk/alpine/libssl3@3.5.8-r0?arch=x86_64&distro=alpine-3.24.1&upstream=openssl"),
+                    // Scenario: without upstream, the binary name alone does not match
+                    Arguments.of("pkg:apk/alpine/openssl?arch=source&distro=alpine-3.24", ALPINE_OPENSSL_RANGE, DOES_NOT_MATCH,
+                            "pkg:apk/alpine/libssl3@3.5.7-r0?arch=x86_64&distro=alpine-3.24.1"),
+                    // Scenario: distro must still match
+                    Arguments.of("pkg:apk/alpine/openssl?arch=source&distro=alpine-3.22", ALPINE_OPENSSL_RANGE, DOES_NOT_MATCH,
+                            "pkg:apk/alpine/libssl3@3.5.7-r0?arch=x86_64&distro=alpine-3.24.1&upstream=openssl"),
+                    // ---
+                    // Debian: cpp 4:12.2.0-3 is built from gcc-defaults 1.203
+                    // ---
+                    // Scenario: compared by source version (the binary version 4:12.2.0-3 is not < 1.204)
+                    Arguments.of("pkg:deb/debian/gcc-defaults?arch=source&distro=debian-12", DEBIAN_GCC_DEFAULTS_RANGE, MATCHES,
+                            "pkg:deb/debian/cpp@4%3A12.2.0-3?arch=amd64&distro=debian-12.15&upstream=gcc-defaults%401.203"),
+                    Arguments.of("pkg:deb/debian/gcc-defaults?arch=source&distro=debian-12", DEBIAN_GCC_DEFAULTS_RANGE, DOES_NOT_MATCH,
+                            "pkg:deb/debian/cpp@4%3A12.2.0-3?arch=amd64&distro=debian-12.15&upstream=gcc-defaults%401.204"),
+                    Arguments.of("pkg:deb/debian/gcc-defaults?arch=source&distro=debian-11", DEBIAN_GCC_DEFAULTS_RANGE, DOES_NOT_MATCH,
+                            "pkg:deb/debian/cpp@4%3A12.2.0-3?arch=amd64&distro=debian-12.15&upstream=gcc-defaults%401.203"),
+                    // Scenario: source name only, source version equals binary version
+                    Arguments.of("pkg:deb/debian/openssl?arch=source&distro=debian-12", withRange().havingEndExcluding("3.0.18-1~deb12u1"), MATCHES,
+                            "pkg:deb/debian/libssl3@3.0.17-1~deb12u2?arch=amd64&distro=debian-12.15&upstream=openssl"),
+                    // Scenario: Ubuntu
+                    Arguments.of("pkg:deb/ubuntu/util-linux?arch=source&distro=ubuntu-24.04", withRange().havingEndExcluding("2.39.3-9ubuntu6.6"), MATCHES,
+                            "pkg:deb/ubuntu/bsdutils@1%3A2.39.3-9ubuntu6.5?arch=amd64&distro=ubuntu-24.04&upstream=util-linux%402.39.3-9ubuntu6.5"),
+                    // ---
+                    // RPM: upstream is not considered
+                    // ---
+                    Arguments.of("pkg:rpm/almalinux/openssl", withRange().havingEndExcluding("3.5.6"), DOES_NOT_MATCH,
+                            "pkg:rpm/almalinux/openssl-libs@3.5.5-6.el9_8?arch=x86_64&upstream=openssl-3.5.5-6.el9_8.src.rpm"));
+        }
+
+        @ParameterizedTest(name = "[{index}] expect={2} src={0} range={1} target={3}")
+        @MethodSource("parameters")
+        void test(
+                String sourcePurlString,
+                Range sourceRange,
+                boolean expectMatch,
+                String targetPurlString) throws Exception {
+            jdbi.useTransaction(handle -> {
+                final long vulnDbId = createVulnerability(handle);
+                createPurlVulnerableSoftware(handle, sourcePurlString, sourceRange, vulnDbId);
+            });
+
+            final var bom = Bom.newBuilder()
+                    .addComponents(
+                            Component.newBuilder()
+                                    .setBomRef("1")
+                                    .setName("acme-lib")
+                                    .setPurl(targetPurlString)
+                                    .build())
+                    .build();
+
+            final Bom vdr = analyzer.analyze(bom);
+
+            if (expectMatch) {
+                assertThat(vdr.getVulnerabilitiesList()).hasSize(1);
+            } else {
+                assertThat(vdr.getVulnerabilitiesList()).isEmpty();
+            }
+        }
+
+        @Test
+        void shouldReportComponentOnceWhenBinaryAndSourcePackageMatch() throws Exception {
+            jdbi.useTransaction(handle -> {
+                final long vulnDbId = createVulnerability(handle);
+                createPurlVulnerableSoftware(handle, "pkg:apk/alpine/libssl3", ALPINE_OPENSSL_RANGE, vulnDbId);
+                createPurlVulnerableSoftware(handle, "pkg:apk/alpine/openssl", ALPINE_OPENSSL_RANGE, vulnDbId);
+            });
+
+            final var bom = Bom.newBuilder()
+                    .addComponents(
+                            Component.newBuilder()
+                                    .setBomRef("1")
+                                    .setName("libssl3")
+                                    .setPurl("pkg:apk/alpine/libssl3@3.5.7-r0?upstream=openssl")
+                                    .build())
+                    .build();
+
+            final Bom vdr = analyzer.analyze(bom);
+
+            assertThat(vdr.getVulnerabilitiesList()).satisfiesExactly(vuln ->
+                    assertThat(vuln.getAffectsList()).satisfiesExactly(affects ->
+                            assertThat(affects.getRef()).isEqualTo("1")));
+        }
+
+    }
+
     @Test
     void shouldNotSkipPurlAnalysisWhenCpeIsInvalid() throws Exception {
         jdbi.useTransaction(handle -> {

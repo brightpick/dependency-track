@@ -32,6 +32,7 @@ import org.cyclonedx.proto.v1_7.Source;
 import org.cyclonedx.proto.v1_7.Vulnerability;
 import org.cyclonedx.proto.v1_7.VulnerabilityAffects;
 import org.dependencytrack.support.distrometadata.OsDistribution;
+import org.dependencytrack.support.distrometadata.SourcePackage;
 import org.dependencytrack.support.jdbi.exception.TransientSqlErrors;
 import org.dependencytrack.vulnanalysis.api.RetryableVulnAnalysisException;
 import org.dependencytrack.vulnanalysis.api.VulnAnalyzer;
@@ -438,9 +439,25 @@ final class InternalVulnAnalyzer implements VulnAnalyzer {
         if (componentPurl == null || componentPurl.getVersion() == null) {
             return false;
         }
-        if (!matchesPurl(componentPurl, criteria)) {
+        if (!matchesPurlTypeAndNamespace(componentPurl, criteria)) {
             return false;
         }
+
+        final String targetVersion;
+        if (Objects.equals(criteria.purlName(), componentPurl.getName())) {
+            targetVersion = effectiveVersionOf(componentPurl);
+        } else if (component.sourcePackage() != null
+                && Objects.equals(criteria.purlName(), component.sourcePackage().name())) {
+            // Advisories for the source package are ranged over source versions,
+            // which on Debian can differ entirely from the binary's (cpp 4:12.2.0-3
+            // is built from gcc-defaults 1.203). Without one, both are the same.
+            targetVersion = component.sourcePackage().version() != null
+                    ? component.sourcePackage().version()
+                    : effectiveVersionOf(componentPurl);
+        } else {
+            return false;
+        }
+
         if (!matchesDistro(componentPurl, criteria)) {
             return false;
         }
@@ -449,13 +466,12 @@ final class InternalVulnAnalyzer implements VulnAnalyzer {
                 KnownVersioningSchemes.fromPurl(componentPurl)
                         .orElse(SCHEME_GENERIC);
 
-        return compareWithVers(criteria, effectiveVersionOf(componentPurl), versioningScheme);
+        return compareWithVers(criteria, targetVersion, versioningScheme);
     }
 
-    private static boolean matchesPurl(PackageURL componentPurl, MatchingCriteria criteria) {
+    private static boolean matchesPurlTypeAndNamespace(PackageURL componentPurl, MatchingCriteria criteria) {
         return Objects.equals(criteria.purlType(), componentPurl.getType())
-                && Objects.equals(criteria.purlNamespace(), componentPurl.getNamespace())
-                && Objects.equals(criteria.purlName(), componentPurl.getName());
+                && Objects.equals(criteria.purlNamespace(), componentPurl.getNamespace());
     }
 
     private boolean compareWithVers(MatchingCriteria criteria, String targetVersion, String versioningScheme) {
@@ -569,7 +585,7 @@ final class InternalVulnAnalyzer implements VulnAnalyzer {
                 continue;
             }
 
-            candidates.add(new CandidateComponent(componentId, parsedCpe, parsedPurl));
+            candidates.add(new CandidateComponent(componentId, parsedCpe, parsedPurl, sourcePackageOf(parsedPurl)));
 
             if (component.getComponentsCount() > 0) {
                 collectScannableComponents(component.getComponentsList(), candidates);
@@ -615,6 +631,20 @@ final class InternalVulnAnalyzer implements VulnAnalyzer {
             LOGGER.warn("Failed to parse PURL '{}'", purl, e);
             return null;
         }
+    }
+
+    /**
+     * Distro advisories (Alpine secdb, Debian and Ubuntu trackers, as mirrored from OSV) are
+     * keyed by source package, e.g. {@code openssl} rather than the binary {@code libssl3}.
+     * RPM advisories are not mirrored as source packages, so RPM is not considered.
+     */
+    private static @Nullable SourcePackage sourcePackageOf(@Nullable PackageURL purl) {
+        if (purl == null
+                || !(PackageURL.StandardTypes.DEBIAN.equals(purl.getType()) || "apk".equals(purl.getType()))) {
+            return null;
+        }
+
+        return SourcePackage.ofUpstreamQualifier(purl);
     }
 
     private static boolean matchesDistro(PackageURL componentPurl, MatchingCriteria criteria) {

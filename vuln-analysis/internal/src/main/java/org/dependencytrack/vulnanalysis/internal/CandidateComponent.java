@@ -19,14 +19,18 @@
 package org.dependencytrack.vulnanalysis.internal;
 
 import com.github.packageurl.PackageURL;
+import org.dependencytrack.support.distrometadata.SourcePackage;
 import org.jspecify.annotations.Nullable;
 import us.springett.parsers.cpe.Cpe;
 
 /**
+ * @param sourcePackage Source package of an OS package, if it is known and
+ *                      distro advisories are keyed by it (apk, deb)
  * @since 5.0.0
  */
 record CandidateComponent(
         long id,
         @Nullable Cpe parsedCpe,
-        @Nullable PackageURL parsedPurl) {
+        @Nullable PackageURL parsedPurl,
+        @Nullable SourcePackage sourcePackage) {
 }

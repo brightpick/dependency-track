@@ -68,6 +68,14 @@ sealed interface Coordinate {
                     purl.getType(),
                     purl.getNamespace(),
                     purl.getName()));
+
+            // Also look up advisories keyed by the source package (e.g. openssl for libssl3).
+            if (component.sourcePackage() != null) {
+                coordinates.add(new Coordinate.PurlCoordinate(
+                        purl.getType(),
+                        purl.getNamespace(),
+                        component.sourcePackage().name()));
+            }
         }
 
         return coordinates;
