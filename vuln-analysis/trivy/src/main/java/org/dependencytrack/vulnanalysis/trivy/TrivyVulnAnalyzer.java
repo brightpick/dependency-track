@@ -26,6 +26,7 @@ import org.cyclonedx.proto.v1_7.Component;
 import org.cyclonedx.proto.v1_7.Property;
 import org.cyclonedx.proto.v1_7.Vulnerability;
 import org.cyclonedx.proto.v1_7.VulnerabilityAffects;
+import org.dependencytrack.support.distrometadata.SourcePackage;
 import org.dependencytrack.vulnanalysis.api.RetryableVulnAnalysisException;
 import org.dependencytrack.vulnanalysis.api.VulnAnalyzer;
 import org.jspecify.annotations.Nullable;
@@ -253,7 +254,7 @@ final class TrivyVulnAnalyzer implements VulnAnalyzer {
         // by Trivy (e.g. syft) record the source package elsewhere; without it, the
         // binary name (e.g. libssl3 instead of openssl) is sent and nothing matches.
         if (srcName == null) {
-            final SourcePackage srcPackage = SourcePackage.of(component, purl);
+            final SourcePackage srcPackage = SyftSourcePackage.of(component, purl);
             if (srcPackage != null) {
                 srcName = srcPackage.name();
                 srcVersion = srcPackage.version();

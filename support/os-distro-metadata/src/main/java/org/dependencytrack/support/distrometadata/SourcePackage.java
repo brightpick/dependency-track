@@ -16,87 +16,70 @@
  * SPDX-License-Identifier: Apache-2.0
  * Copyright (c) OWASP Foundation. All Rights Reserved.
  */
-package org.dependencytrack.vulnanalysis.trivy;
+package org.dependencytrack.support.distrometadata;
 
 import com.github.packageurl.PackageURL;
-import org.cyclonedx.proto.v1_7.Component;
-import org.cyclonedx.proto.v1_7.Property;
 import org.jspecify.annotations.Nullable;
 
-import java.util.HashMap;
-import java.util.Map;
-
 /**
- * Source package of an OS package, as recorded by SBOM generators other than Trivy.
+ * Source package an OS package was built from.
  * <p>
- * Sources, in order of precedence:
- * <ul>
- *   <li>syft properties: {@code syft:metadata:originPackage} (apk),
- *       {@code syft:metadata:source} and {@code syft:metadata:sourceVersion} (deb),
- *       {@code syft:metadata:sourceRpm} (rpm)</li>
- *   <li>the {@code upstream} PURL qualifier, as written by syft: {@code openssl} (apk),
- *       {@code gcc-defaults@1.203} (deb), {@code openssl-3.5.5-6.el9_8.src.rpm} (rpm)</li>
- * </ul>
+ * Distro advisories (Alpine secdb, Debian and Ubuntu trackers) are keyed by source package,
+ * which often differs from the binary package, e.g. {@code libssl3} is built from {@code openssl}.
  * A {@code null} version means the source version equals the binary version.
  *
  * @param name    Source package name
  * @param version Source package version, without release for RPM
  * @param release Source package release, RPM only
  */
-record SourcePackage(String name, @Nullable String version, @Nullable String release) {
+public record SourcePackage(String name, @Nullable String version, @Nullable String release) {
 
-    private static final String SYFT_ORIGIN_PACKAGE = "syft:metadata:originPackage";
-    private static final String SYFT_SOURCE = "syft:metadata:source";
-    private static final String SYFT_SOURCE_VERSION = "syft:metadata:sourceVersion";
-    private static final String SYFT_SOURCE_RPM = "syft:metadata:sourceRpm";
-
-    static @Nullable SourcePackage of(Component component, PackageURL purl) {
-        final Map<String, String> properties = new HashMap<>();
-        for (final Property property : component.getPropertiesList()) {
-            properties.putIfAbsent(property.getName(), property.getValue());
-        }
-
+    /**
+     * Derives the source package from the {@code upstream} PURL qualifier, as written by syft:
+     * {@code openssl} (apk), {@code gcc-defaults@1.203} (deb), {@code openssl-3.5.5-6.el9_8.src.rpm} (rpm).
+     *
+     * @return The source package, or {@code null} if the PURL has none or it could not be parsed
+     */
+    public static @Nullable SourcePackage ofUpstreamQualifier(PackageURL purl) {
         // Qualifier values are already percent-decoded by PackageURL.
         final String upstream = purl.getQualifiers() != null
                 ? purl.getQualifiers().get("upstream")
                 : null;
+        if (isBlank(upstream)) {
+            return null;
+        }
 
         return switch (purl.getType()) {
-            case "apk" -> ofName(firstNonBlank(properties.get(SYFT_ORIGIN_PACKAGE), upstream));
-            case "deb" -> {
-                final String source = properties.get(SYFT_SOURCE);
-                yield isBlank(source)
-                        ? ofDebianUpstream(upstream)
-                        : new SourcePackage(source, blankToNull(properties.get(SYFT_SOURCE_VERSION)), null);
-            }
-            case "rpm" -> ofSourceRpm(firstNonBlank(properties.get(SYFT_SOURCE_RPM), upstream));
+            case "apk" -> ofName(upstream);
+            case "deb" -> ofNameAndVersion(upstream);
+            case "rpm" -> ofSourceRpm(upstream);
             default -> null;
         };
     }
 
-    private static @Nullable SourcePackage ofName(@Nullable String name) {
+    public static @Nullable SourcePackage ofName(@Nullable String name) {
         return isBlank(name) ? null : new SourcePackage(name, null, null);
     }
 
     /**
      * Parses {@code <name>[@<version>]}.
      */
-    private static @Nullable SourcePackage ofDebianUpstream(@Nullable String upstream) {
-        if (isBlank(upstream)) {
+    public static @Nullable SourcePackage ofNameAndVersion(@Nullable String nameAndVersion) {
+        if (isBlank(nameAndVersion)) {
             return null;
         }
 
-        final int atIndex = upstream.indexOf('@');
+        final int atIndex = nameAndVersion.indexOf('@');
         if (atIndex < 0) {
-            return new SourcePackage(upstream, null, null);
+            return new SourcePackage(nameAndVersion, null, null);
         }
         if (atIndex == 0) {
             return null;
         }
 
         return new SourcePackage(
-                upstream.substring(0, atIndex),
-                blankToNull(upstream.substring(atIndex + 1)),
+                nameAndVersion.substring(0, atIndex),
+                blankToNull(nameAndVersion.substring(atIndex + 1)),
                 null);
     }
 
@@ -104,7 +87,7 @@ record SourcePackage(String name, @Nullable String version, @Nullable String rel
      * Parses an SRPM file name ({@code <name>-<version>-<release>.<arch>.rpm}),
      * the same way Trivy's own RPM analyzer does.
      */
-    private static @Nullable SourcePackage ofSourceRpm(@Nullable String sourceRpm) {
+    public static @Nullable SourcePackage ofSourceRpm(@Nullable String sourceRpm) {
         if (isBlank(sourceRpm) || !sourceRpm.endsWith(".rpm")) {
             return null;
         }
@@ -136,10 +119,6 @@ record SourcePackage(String name, @Nullable String version, @Nullable String rel
         }
 
         return new SourcePackage(name, version, release);
-    }
-
-    private static @Nullable String firstNonBlank(@Nullable String first, @Nullable String second) {
-        return !isBlank(first) ? first : second;
     }
 
     private static @Nullable String blankToNull(@Nullable String value) {
