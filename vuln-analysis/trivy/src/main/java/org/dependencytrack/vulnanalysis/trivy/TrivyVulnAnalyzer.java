@@ -28,6 +28,7 @@ import org.cyclonedx.proto.v1_7.Vulnerability;
 import org.cyclonedx.proto.v1_7.VulnerabilityAffects;
 import org.dependencytrack.vulnanalysis.api.RetryableVulnAnalysisException;
 import org.dependencytrack.vulnanalysis.api.VulnAnalyzer;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import trivy.proto.cache.v1.BlobInfo;
@@ -216,10 +217,7 @@ final class TrivyVulnAnalyzer implements VulnAnalyzer {
         if (purl.getQualifiers() != null) {
             arch = purl.getQualifiers().get("arch");
 
-            final String tmpEpoch = purl.getQualifiers().get("epoch");
-            if (tmpEpoch != null) {
-                epoch = Integer.parseInt(tmpEpoch);
-            }
+            epoch = tryParseEpoch(purl.getQualifiers().get("epoch"));
 
             final String distro = purl.getQualifiers().get("distro");
             if (distro != null) {
@@ -238,7 +236,7 @@ final class TrivyVulnAnalyzer implements VulnAnalyzer {
             } else if ("aquasecurity:trivy:SrcRelease".equals(propName)) {
                 srcRelease = propValue;
             } else if ("aquasecurity:trivy:SrcEpoch".equals(propName)) {
-                srcEpoch = Integer.parseInt(propValue);
+                srcEpoch = tryParseEpoch(propValue);
             } else if (!pkgType.contains("-") && "aquasecurity:trivy:PkgType".equals(propName)) {
                 pkgType = propValue;
 
@@ -247,6 +245,22 @@ final class TrivyVulnAnalyzer implements VulnAnalyzer {
                     if (distro != null) {
                         pkgType += "-" + URLDecoder.decode(distro, StandardCharsets.UTF_8);
                     }
+                }
+            }
+        }
+
+        // Trivy looks up OS package advisories by source package. SBOMs not produced
+        // by Trivy (e.g. syft) record the source package elsewhere; without it, the
+        // binary name (e.g. libssl3 instead of openssl) is sent and nothing matches.
+        if (srcName == null) {
+            final SourcePackage srcPackage = SourcePackage.of(component, purl);
+            if (srcPackage != null) {
+                srcName = srcPackage.name();
+                srcVersion = srcPackage.version();
+                srcRelease = srcPackage.release();
+                if (PackageURL.StandardTypes.RPM.equals(purl.getType())) {
+                    // Like Trivy's own RPM analyzer, assume the SRPM shares the binary's epoch.
+                    srcEpoch = epoch;
                 }
             }
         }
@@ -404,6 +418,19 @@ final class TrivyVulnAnalyzer implements VulnAnalyzer {
                                 .map(Vulnerability.Builder::build)
                                 .toList())
                 .build();
+    }
+
+    private static @Nullable Integer tryParseEpoch(@Nullable String epoch) {
+        if (epoch == null || epoch.isBlank()) {
+            return null;
+        }
+
+        try {
+            return Integer.parseInt(epoch);
+        } catch (NumberFormatException e) {
+            LOGGER.debug("Ignoring non-numeric epoch '{}'", epoch);
+            return null;
+        }
     }
 
     private static boolean isInternalComponent(Component component) {

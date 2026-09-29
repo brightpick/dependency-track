@@ -30,6 +30,7 @@ import org.cyclonedx.proto.v1_7.Property;
 import org.dependencytrack.vulnanalysis.api.RetryableVulnAnalysisException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import trivy.proto.cache.v1.BlobInfo;
 import trivy.proto.cache.v1.PutBlobRequest;
 import trivy.proto.common.CVSS;
 import trivy.proto.common.DataSource;
@@ -412,6 +413,116 @@ class TrivyVulnAnalyzerTest {
     }
 
     @Test
+    void testAnalyzeOsPackageUsesSyftSourcePackage() throws Exception {
+        stubTrivyEndpoints(ScanResponse.getDefaultInstance());
+
+        final Bom bom = Bom.newBuilder()
+                .addComponents(Component.newBuilder()
+                        .setBomRef("os-1")
+                        .setName("alpine")
+                        .setVersion("3.24.1")
+                        .setType(Classification.CLASSIFICATION_OPERATING_SYSTEM)
+                        .build())
+                .addComponents(Component.newBuilder()
+                        .setBomRef("1")
+                        .setName("libssl3")
+                        .setVersion("3.5.7-r0")
+                        .setPurl("pkg:apk/alpine/libssl3@3.5.7-r0?arch=x86_64&distro=alpine-3.24.1&upstream=openssl")
+                        .setType(CLASSIFICATION_LIBRARY)
+                        .addProperties(Property.newBuilder()
+                                .setName("syft:metadata:originPackage").setValue("openssl").build())
+                        .build())
+                .build();
+
+        analyzer.analyze(bom);
+
+        final BlobInfo blobInfo = singlePutBlobRequest().getBlobInfo();
+        assertThat(blobInfo.getOs().getFamily()).isEqualTo("alpine");
+        assertThat(blobInfo.getOs().getName()).isEqualTo("3.24.1");
+
+        final trivy.proto.common.Package pkg = blobInfo.getPackageInfos(0).getPackages(0);
+        assertThat(pkg.getName()).isEqualTo("libssl3");
+        assertThat(pkg.getSrcName()).isEqualTo("openssl");
+        assertThat(pkg.getSrcVersion()).isEqualTo("3.5.7-r0");
+    }
+
+    @Test
+    void testAnalyzeRpmPackageUsesSourceRpmAndBinaryEpoch() throws Exception {
+        stubTrivyEndpoints(ScanResponse.getDefaultInstance());
+
+        final Bom bom = Bom.newBuilder()
+                .addComponents(Component.newBuilder()
+                        .setBomRef("1")
+                        .setName("openssl-libs")
+                        .setVersion("3.5.5-6.el9_8")
+                        .setPurl("pkg:rpm/almalinux/openssl-libs@3.5.5-6.el9_8?arch=x86_64&epoch=1&distro=almalinux-9.8"
+                                + "&upstream=openssl-3.5.5-6.el9_8.src.rpm")
+                        .setType(CLASSIFICATION_LIBRARY)
+                        .build())
+                .build();
+
+        analyzer.analyze(bom);
+
+        final trivy.proto.common.Package pkg =
+                singlePutBlobRequest().getBlobInfo().getPackageInfos(0).getPackages(0);
+        assertThat(pkg.getSrcName()).isEqualTo("openssl");
+        assertThat(pkg.getSrcVersion()).isEqualTo("3.5.5");
+        assertThat(pkg.getSrcRelease()).isEqualTo("6.el9_8");
+        assertThat(pkg.getEpoch()).isEqualTo(1);
+        assertThat(pkg.getSrcEpoch()).isEqualTo(1);
+    }
+
+    @Test
+    void testAnalyzeOsPackagePrefersTrivyPropertiesOverSyft() throws Exception {
+        stubTrivyEndpoints(ScanResponse.getDefaultInstance());
+
+        final Bom bom = Bom.newBuilder()
+                .addComponents(Component.newBuilder()
+                        .setBomRef("1")
+                        .setName("cpp")
+                        .setVersion("4:12.2.0-3")
+                        .setPurl("pkg:deb/debian/cpp@4%3A12.2.0-3?arch=amd64&distro=debian-12.15&upstream=gcc-defaults%401.203")
+                        .setType(CLASSIFICATION_LIBRARY)
+                        .addProperties(Property.newBuilder()
+                                .setName("aquasecurity:trivy:SrcName").setValue("from-trivy").build())
+                        .addProperties(Property.newBuilder()
+                                .setName("syft:metadata:source").setValue("gcc-defaults").build())
+                        .build())
+                .build();
+
+        analyzer.analyze(bom);
+
+        final trivy.proto.common.Package pkg =
+                singlePutBlobRequest().getBlobInfo().getPackageInfos(0).getPackages(0);
+        assertThat(pkg.getSrcName()).isEqualTo("from-trivy");
+        assertThat(pkg.getSrcVersion()).isEqualTo("4:12.2.0-3");
+    }
+
+    @Test
+    void testAnalyzeOsPackageIgnoresNonNumericEpoch() throws Exception {
+        stubTrivyEndpoints(ScanResponse.getDefaultInstance());
+
+        final Bom bom = Bom.newBuilder()
+                .addComponents(Component.newBuilder()
+                        .setBomRef("1")
+                        .setName("foo")
+                        .setVersion("1.0-1")
+                        .setPurl("pkg:rpm/redhat/foo@1.0-1?arch=x86_64&epoch=abc&distro=rhel-9.4")
+                        .setType(CLASSIFICATION_LIBRARY)
+                        .addProperties(Property.newBuilder()
+                                .setName("aquasecurity:trivy:SrcEpoch").setValue("").build())
+                        .build())
+                .build();
+
+        analyzer.analyze(bom);
+
+        final trivy.proto.common.Package pkg =
+                singlePutBlobRequest().getBlobInfo().getPackageInfos(0).getPackages(0);
+        assertThat(pkg.getEpoch()).isZero();
+        assertThat(pkg.getSrcEpoch()).isZero();
+    }
+
+    @Test
     void testSkipsComponentsWithoutVersion() throws Exception {
         stubTrivyEndpoints(ScanResponse.getDefaultInstance());
 
@@ -461,6 +572,13 @@ class TrivyVulnAnalyzerTest {
                 .anySatisfy(app -> assertThat(app.getPackagesList())
                         .anySatisfy(pkg -> assertThat(pkg.getName())
                                 .isEqualTo("symfony/http-foundation")));
+    }
+
+    private static PutBlobRequest singlePutBlobRequest() throws Exception {
+        final var putBlobRequests = WireMock.findAll(
+                postRequestedFor(urlPathEqualTo("/twirp/trivy.cache.v1.Cache/PutBlob")));
+        assertThat(putBlobRequests).hasSize(1);
+        return PutBlobRequest.parseFrom(putBlobRequests.get(0).getBody());
     }
 
     private void stubTrivyEndpoints(ScanResponse scanResponse) {
