@@ -78,4 +78,31 @@ component mutation is removed:
 * Existing API consumers that relied on mutating imported components will
   receive `405` and must migrate to component analyses.
 
+## Follow-up (2026-10-23)
+
+Later work adds four details to the decision. None of them changes it.
+
+A multi-license is curated as a whole. An override fills one of three license slots that mirror
+the component: a resolved license (`LICENSE_ID`), an SPDX expression of more than one known
+license (`LICENSE_EXPRESSION`), or a free-text name (`LICENSE_NAME`). At most one slot is set,
+and a check constraint on `COMPONENT_ANALYSIS` and `COMPONENT_POLICY` enforces it. Reducing a
+multi-license to one of its members would record a decision nobody made.
+
+Policies can see that a license is curated. `COMPONENT.LICENSE_CURATED` marks a component whose
+license an analysis set, and policy conditions read it as `component.license_curated`. Every
+import resets the flag while it synchronizes the component fields, and the analysis applier sets
+it again, so a deleted or retracted analysis leaves no flag behind. This adds a second touch point
+in `ImportBomActivity`, next to the applier hook. Component policies run before the applier and
+always see the flag as false, so a component policy condition on it is rejected.
+
+Curation is its own permission. `COMPONENT_ANALYSIS` covers analyses, their comments and the
+component policies; analyses required `POLICY_MANAGEMENT` before. The migration grants it to the
+Administrators team, and other teams get it by hand. A component policy acts across the whole
+portfolio, so a team with this permission can change licenses in projects it cannot otherwise
+access.
+
+Clearing an override or deleting an analysis writes the declared-license snapshot back at once,
+not on the next upload. It does so only on the components that carry the override, so a
+component that a later upload changed keeps that upload's license.
+
 [#251]: https://github.com/DependencyTrack/dependency-track/issues/251
