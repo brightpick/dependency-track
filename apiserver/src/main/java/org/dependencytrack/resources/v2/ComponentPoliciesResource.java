@@ -42,6 +42,7 @@ import org.dependencytrack.policy.cel.CelPolicyType;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.inJdbiTransaction;
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.withJdbiHandle;
@@ -57,6 +58,8 @@ import static org.dependencytrack.util.PersistenceUtil.isUniqueConstraintViolati
  */
 @Provider
 public final class ComponentPoliciesResource extends AbstractApiResource implements ComponentPoliciesApi {
+
+    private static final Pattern LICENSE_CURATED = Pattern.compile("\\blicense_curated\\b");
 
     @Context
     private UriInfo uriInfo;
@@ -84,7 +87,6 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
                     qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
             final long id = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
                 final var dao = new ComponentPolicyDao(handle);
-                requireNameFree(dao, request.getName(), null);
                 return dao.create(
                     request.getName(), request.getDescription(), getPrincipal().getName(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
@@ -110,7 +112,6 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
                     qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
             final boolean updated = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
                 final var dao = new ComponentPolicyDao(handle);
-                requireNameFree(dao, request.getName(), id);
                 return dao.update(
                     id, request.getName(), request.getDescription(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
@@ -138,8 +139,9 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     /**
-     * Two requests may pass the name check together; the unique index then
-     * rejects the later one — still a 409 on the name, not a database error.
+     * Policy names are unique: the unique index rejects a taken name, and
+     * that is a 409 naming the name, not a database error. An update of an
+     * unknown id changes no row, so it stays a 404 whatever its name.
      */
     private static <T> T orNameConflict(final String name, final Supplier<T> action) {
         try {
@@ -154,18 +156,16 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     /**
-     * Policy names are unique; a taken name is a 409 naming the name, not a
-     * database error.
+     * The condition must compile as a component policy condition, and must
+     * not read {@code component.license_curated}: every import resets that
+     * flag before the component policies run, so such a condition would
+     * never match.
      */
-    private static void requireNameFree(final ComponentPolicyDao dao, final String name, final Long ownId) {
-        final Long holder = dao.idByName(name).orElse(null);
-        if (holder != null && !holder.equals(ownId)) {
-            throw new AlreadyExistsException(
-                    "A component policy named \"%s\" already exists".formatted(name));
-        }
-    }
-
     private static void validateCondition(final String condition) {
+        if (LICENSE_CURATED.matcher(condition).find()) {
+            throw new BadRequestException(
+                    "component.license_curated is always false in a component policy condition");
+        }
         try {
             CelPolicyCompiler.getInstance(CelPolicyType.COMPONENT)
                     .compile(condition, CelPolicyCompiler.CacheMode.NO_CACHE);

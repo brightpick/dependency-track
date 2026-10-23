@@ -26,7 +26,8 @@ put:
   operationId: updateComponentPolicy
   summary: Update a component policy
   description: |-
-    In the condition, `component.license_curated` is the persisted state: every import resets it before the component policies run, so it reads false there; it is meaningful to the portfolio policies evaluated afterwards.
+    A condition on `component.license_curated` is rejected with a 400: every
+    import resets the flag before the component policies run.
     Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies

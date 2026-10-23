@@ -41,7 +41,8 @@ post:
   operationId: createComponentPolicy
   summary: Create a component policy
   description: |-
-    In the condition, `component.license_curated` is the persisted state: every import resets it before the component policies run, so it reads false there; it is meaningful to the portfolio policies evaluated afterwards.
+    A condition on `component.license_curated` is rejected with a 400: every
+    import resets the flag before the component policies run.
     The CEL condition is compiled server-side; compilation failures are
     rejected with a 400 response. The policy applies to every BOM ingest,
     portfolio-wide: components matching the condition get a license

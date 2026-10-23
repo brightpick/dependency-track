@@ -155,6 +155,29 @@ class ComponentPoliciesResourceTest extends ResourceTest {
         final Response renamed = jersey.target("/component-policies/" + otherId).request()
                 .header(X_API_KEY, apiKey).put(Entity.json(body));
         assertThat(renamed.getStatus()).isEqualTo(409);
+
+        // an unknown id is a 404, also with a taken name
+        final Response unknown = jersey.target("/component-policies/999999").request()
+                .header(X_API_KEY, apiKey).put(Entity.json(body));
+        assertThat(unknown.getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void shouldRejectAConditionOnLicenseCurated() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final Response response = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "never matches",
+                          "condition": "!component.license_curated",
+                          "license": "Apache-2.0"
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().contains("license_curated");
     }
 
     @Test
