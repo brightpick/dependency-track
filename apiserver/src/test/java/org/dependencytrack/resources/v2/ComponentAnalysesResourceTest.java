@@ -352,6 +352,70 @@ class ComponentAnalysesResourceTest extends ResourceTest {
     }
 
     @Test
+    void shouldRestoreNoLicenseWhenAnalysisOfUnlicensedComponentIsDeleted() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", null);
+
+        assertThat(upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license": "Apache-2.0"
+                }
+                """.formatted(project.getUuid())).getStatus()).isEqualTo(204);
+        final long analysisId = getAnalysisFromList(project.getUuid(), "acme-lib")
+                .getJsonNumber("id").longValue();
+
+        assertThat(jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(204);
+
+        qm.getPersistenceManager().evictAll();
+        final Component restored = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(restored.getResolvedLicense()).isNull();
+        assertThat(restored.getLicense()).isNull();
+        assertThat(restored.isLicenseCurated()).isFalse();
+    }
+
+    @Test
+    void shouldKeepLaterLicenseWhenClearedAnalysisIsDeleted() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Proprietary Foo");
+
+        final String identity = """
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0"
+                """.formatted(project.getUuid());
+        assertThat(upsertAnalysis("{" + identity + ", \"license\": \"Apache-2.0\"}").getStatus())
+                .isEqualTo(204);
+        assertThat(upsertAnalysis("{" + identity + ", \"details\": \"kept\"}").getStatus())
+                .isEqualTo(204);
+        final long analysisId = getAnalysisFromList(project.getUuid(), "acme-lib")
+                .getJsonNumber("id").longValue();
+
+        // a later upload declares another license; the cleared override no
+        // longer covers the component
+        qm.getPersistenceManager().evictAll();
+        final Component uploaded = qm.getObjectByUuid(Component.class, component.getUuid());
+        uploaded.setLicense("Proprietary Bar");
+        qm.persist(uploaded);
+
+        assertThat(jersey.target("/component-analyses/" + analysisId).request()
+                .header(X_API_KEY, apiKey).delete().getStatus()).isEqualTo(204);
+
+        qm.getPersistenceManager().evictAll();
+        assertThat(qm.getObjectByUuid(Component.class, component.getUuid()).getLicense())
+                .isEqualTo("Proprietary Bar");
+    }
+
+    @Test
     void shouldReturn404WhenDeletingNonExistentAnalysis() {
         initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
 

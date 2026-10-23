@@ -152,18 +152,15 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
         }
         inJdbiTransaction(handle -> {
             final var dao = new ComponentAnalysisDao(handle);
-            // the component carries the uploaded license again, not the deleted
-            // decision — also when the decision's license has since left the
-            // catalogue, which empties the override but not the snapshot
-            if (analysis.declaredLicenseId() != null || analysis.declaredLicenseName() != null
-                    || analysis.declaredLicenseExpression() != null) {
-                dao.restoreDeclaredLicense(
-                        analysis.projectId(), analysis.purl(), analysis.group(),
-                        analysis.name(), analysis.version(),
-                        analysis.declaredLicenseId(),
-                        analysis.declaredLicenseName(),
-                        analysis.declaredLicenseExpression());
-            }
+            // a component that carries the decision gets its uploaded license
+            // back, also an empty one, and also when the decision's license has
+            // since left the catalogue
+            dao.restoreDeclaredLicense(
+                    analysis.projectId(), analysis.purl(), analysis.group(),
+                    analysis.name(), analysis.version(),
+                    analysis.declaredLicenseId(),
+                    analysis.declaredLicenseName(),
+                    analysis.declaredLicenseExpression());
             dao.delete(analysis.id());
             return null;
         });

@@ -274,8 +274,11 @@ public final class ComponentAnalysisDao {
     }
 
     /**
-     * Restores the declared-license snapshot onto the project's currently
-     * matching component rows — the instant part of clearing an override.
+     * Restores the declared-license snapshot onto the project's matching
+     * component rows that carry the override ({@code LICENSE_CURATED}) — the
+     * instant part of clearing or deleting an analysis. A row the override no
+     * longer covers keeps its license: the snapshot describes the upload the
+     * override was applied to, not a later one.
      */
     public int restoreDeclaredLicense(
             final long projectId,
@@ -292,7 +295,8 @@ public final class ComponentAnalysisDao {
                              , "LICENSE" = :declaredLicenseName
                              , "LICENSE_EXPRESSION" = :declaredLicenseExpression
                              , "LICENSE_CURATED" = FALSE
-                         WHERE "PROJECT_ID" = :projectId
+                         WHERE "LICENSE_CURATED" IS TRUE
+                           AND "PROJECT_ID" = :projectId
                            AND COALESCE("PURL", '') = COALESCE(:purl, '')
                            AND COALESCE("GROUP", '') = COALESCE(:group, '')
                            AND "NAME" = :name
