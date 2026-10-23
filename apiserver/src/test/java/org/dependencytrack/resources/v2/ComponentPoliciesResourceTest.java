@@ -427,7 +427,7 @@ class ComponentPoliciesResourceTest extends ResourceTest {
 
         assertThat(response.getStatus()).isEqualTo(400);
         assertThatJson(getPlainTextBody(response))
-                .node("detail").isString().startsWith("Exactly one of license");
+                .node("detail").isString().startsWith("At most one of license");
         final List<ComponentPolicyDao.ComponentPolicy> policies = withJdbiHandle(
                 handle -> new ComponentPolicyDao(handle).getAll());
         assertThat(policies).isEmpty();

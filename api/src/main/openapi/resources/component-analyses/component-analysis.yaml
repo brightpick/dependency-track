@@ -26,8 +26,8 @@ delete:
   operationId: deleteComponentAnalysis
   summary: Delete a component analysis
   description: |-
-    Deletes a component analysis and its audit trail. The component's
-    license reverts to the BOM-declared state on the next upload.
+    Deletes a component analysis and its audit trail. A component that
+    carries the override gets its BOM-declared license back at once.
 
     Requires permission `COMPONENT_ANALYSIS`.
   tags:

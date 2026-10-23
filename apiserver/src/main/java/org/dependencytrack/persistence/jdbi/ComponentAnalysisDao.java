@@ -44,7 +44,7 @@ public final class ComponentAnalysisDao {
     }
 
     /**
-     * The license an analysis applies — exactly one of a resolved license
+     * The license an analysis applies — at most one of a resolved license
      * (incl. custom licenses), an SPDX expression, or a free-text name,
      * mirroring the component's three license slots. {@link #NONE} carries
      * no license override (details only).

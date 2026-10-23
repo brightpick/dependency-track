@@ -31,7 +31,6 @@ import org.dependencytrack.api.v2.model.ListComponentAnalysesResponse;
 import org.dependencytrack.api.v2.model.ListComponentAnalysisCommentsResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentAnalysisRequest;
 import org.dependencytrack.auth.Permissions;
-import org.dependencytrack.model.License;
 import org.dependencytrack.model.Project;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.resources.AbstractApiResource;
@@ -223,29 +222,14 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     private ComponentAnalysis requireAnalysis(final QueryManager qm, final long id) {
         final ComponentAnalysis analysis = withJdbiHandle(handle -> new ComponentAnalysisDao(handle).getById(id))
                 .orElseThrow(NotFoundException::new);
-        final Project project = qm.getObjectById(Project.class, analysis.projectId());
-        if (project == null) {
-            throw new NotFoundException();
-        }
-        requireAccess(qm, project);
+        requireAccess(qm, qm.getObjectById(Project.class, analysis.projectId()));
         return analysis;
-    }
-
-    /**
-     * Display label of a license: its SPDX ID, or the name for custom licenses.
-     */
-    private static String licenseLabel(final QueryManager qm, final long licenseId) {
-        final License license = qm.getObjectById(License.class, licenseId);
-        if (license == null) {
-            return "unknown";
-        }
-        return license.getLicenseId() != null ? license.getLicenseId() : license.getName();
     }
 
     private static org.dependencytrack.api.v2.model.ComponentAnalysis mapAnalysis(
             final QueryManager qm, final ComponentAnalysis analysis) {
         final String licenseIdOrName = analysis.licenseId() != null
-                ? licenseLabel(qm, analysis.licenseId())
+                ? LicenseOverrideResolver.licenseLabel(qm, analysis.licenseId())
                 : null;
         // the snapshot keeps the three slots apart; the response carries the
         // value plus which slot it came from, since the policies judge an id,
@@ -253,7 +237,7 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
         String declaredLicense = analysis.declaredLicenseExpression();
         String declaredLicenseKind = declaredLicense != null ? "expression" : null;
         if (declaredLicense == null && analysis.declaredLicenseId() != null) {
-            declaredLicense = licenseLabel(qm, analysis.declaredLicenseId());
+            declaredLicense = LicenseOverrideResolver.licenseLabel(qm, analysis.declaredLicenseId());
             declaredLicenseKind = "id";
         }
         if (declaredLicense == null && analysis.declaredLicenseName() != null) {

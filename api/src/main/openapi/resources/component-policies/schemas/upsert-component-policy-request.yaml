@@ -35,13 +35,14 @@ properties:
   license:
     type: string
     description: |-
-      SPDX license ID or custom license name applied on match. Exactly one of
+      SPDX license ID or custom license name applied on match. At most one of
       license, license_expression and license_name may be set.
   license_expression:
     type: string
     description: |-
-      SPDX license expression applied on match; every operand must be a known
-      SPDX ID or custom license name
+      SPDX license expression of more than one license, applied on match; each
+      license, also on the left of WITH, must be a known SPDX ID or custom
+      license name
   license_name:
     type: string
     description: Free-text license name applied on match

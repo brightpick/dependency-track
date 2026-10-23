@@ -32,7 +32,6 @@ import org.dependencytrack.api.v2.model.ListComponentPoliciesResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentPolicyRequest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.exception.AlreadyExistsException;
-import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
@@ -176,13 +175,9 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     private static ComponentPolicy mapPolicy(final QueryManager qm, final ComponentPolicyDao.ComponentPolicy policy) {
-        String license = null;
-        if (policy.licenseId() != null) {
-            final License resolved = qm.getObjectById(License.class, policy.licenseId());
-            if (resolved != null) {
-                license = resolved.getLicenseId() != null ? resolved.getLicenseId() : resolved.getName();
-            }
-        }
+        final String license = policy.licenseId() != null
+                ? LicenseOverrideResolver.licenseLabel(qm, policy.licenseId())
+                : null;
         return ComponentPolicy.builder()
                 .id(policy.id())
                 .name(policy.name())

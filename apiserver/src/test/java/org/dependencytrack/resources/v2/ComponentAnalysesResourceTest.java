@@ -643,7 +643,7 @@ class ComponentAnalysesResourceTest extends ResourceTest {
 
         assertThat(response.getStatus()).isEqualTo(400);
         assertThatJson(getPlainTextBody(response))
-                .node("detail").isString().startsWith("Exactly one of license");
+                .node("detail").isString().startsWith("At most one of license");
     }
 
     @Test
@@ -731,6 +731,27 @@ class ComponentAnalysesResourceTest extends ResourceTest {
             assertThatJson(getPlainTextBody(response))
                     .node("detail").isString().startsWith("Invalid SPDX expression");
         }
+    }
+
+    @Test
+    void singleLicenseExpressionIsRejected() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createSpdxLicense("MIT", "MIT License");
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "MIT"
+                }
+                """.formatted(project.getUuid()));
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().isEqualTo("MIT is a single license, not an expression; it goes into `license`");
     }
 
     @Test
