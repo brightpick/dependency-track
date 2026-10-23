@@ -588,6 +588,7 @@ public final class ImportBomActivity implements Activity<ImportBomArg, Void> {
         CelComponentPolicyApplier.applyPolicies(project, persistentComponentByIdentity.values());
         final var componentAnalysisApplier = ComponentAnalysisApplier.forProject(qm, project.getId());
         persistentComponentByIdentity.values().forEach(componentAnalysisApplier::apply);
+        componentAnalysisApplier.writeSnapshots();
         qm.getPersistenceManager().flush();
 
         return persistentComponentByIdentity;

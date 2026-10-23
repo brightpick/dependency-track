@@ -23,6 +23,7 @@ import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
+import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentLicenseRow;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -53,6 +54,7 @@ public final class ComponentAnalysisApplier {
     private final QueryManager qm;
     private final Map<IdentityKey, ComponentAnalysis> analysesByIdentity;
     private final Map<Long, License> licenseCache = new HashMap<>();
+    private final Map<Long, ComponentLicenseRow> pendingSnapshots = new HashMap<>();
     private int appliedCount;
 
     private ComponentAnalysisApplier(final QueryManager qm, final Map<IdentityKey, ComponentAnalysis> analysesByIdentity) {
@@ -93,17 +95,13 @@ public final class ComponentAnalysisApplier {
             if (override.licenseId() != null && license == null) {
                 LOGGER.warn("Component analysis {} references a license that no longer exists; skipping license override", analysis.id());
             } else {
-                // refresh the declared snapshot from what this upload brought,
-                // BEFORE overriding — clearing the override restores it
-                withJdbiHandle(handle -> {
-                    new ComponentAnalysisDao(handle).updateDeclaredSnapshot(
-                            analysis.id(),
-                            component.getResolvedLicense() != null
-                                    ? component.getResolvedLicense().getId() : null,
-                            component.getLicense(),
-                            component.getLicenseExpression());
-                    return null;
-                });
+                // the declared snapshot is what this upload brought, taken
+                // BEFORE overriding; writeSnapshots stores it
+                pendingSnapshots.put(analysis.id(), new ComponentLicenseRow(
+                        component.getResolvedLicense() != null
+                                ? component.getResolvedLicense().getId() : null,
+                        component.getLicense(),
+                        component.getLicenseExpression()));
                 // the override fills its slot and clears the other two
                 component.setResolvedLicense(license);
                 component.setLicenseExpression(override.licenseExpression());
@@ -115,6 +113,22 @@ public final class ComponentAnalysisApplier {
             component.setNotes(analysis.details());
         }
         appliedCount++;
+    }
+
+    /**
+     * Stores the declared-license snapshots taken by {@link #apply} in one
+     * batch, so clearing or deleting an analysis restores this upload's
+     * license.
+     */
+    public void writeSnapshots() {
+        if (pendingSnapshots.isEmpty()) {
+            return;
+        }
+        withJdbiHandle(handle -> {
+            new ComponentAnalysisDao(handle).updateDeclaredSnapshots(pendingSnapshots);
+            return null;
+        });
+        pendingSnapshots.clear();
     }
 
     public int appliedCount() {

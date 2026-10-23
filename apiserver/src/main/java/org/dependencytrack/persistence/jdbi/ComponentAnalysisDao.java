@@ -20,11 +20,13 @@ package org.dependencytrack.persistence.jdbi;
 
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.mapper.RowMapper;
+import org.jdbi.v3.core.statement.PreparedBatch;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -55,6 +57,13 @@ public final class ComponentAnalysisDao {
             @Nullable String licenseName) {
 
         public static final LicenseOverride NONE = new LicenseOverride(null, null, null);
+
+        public LicenseOverride {
+            if ((licenseId != null ? 1 : 0) + (licenseExpression != null ? 1 : 0)
+                    + (licenseName != null ? 1 : 0) > 1) {
+                throw new IllegalArgumentException("A license override fills at most one license slot");
+            }
+        }
 
         public boolean isEmpty() {
             return licenseId == null && licenseExpression == null && licenseName == null;
@@ -311,6 +320,30 @@ public final class ComponentAnalysisDao {
                 .bind("declaredLicenseName", declaredLicenseName)
                 .bind("declaredLicenseExpression", declaredLicenseExpression)
                 .execute();
+    }
+
+    /**
+     * Stores the declared-license snapshots of many analyses in one batch,
+     * keyed by analysis id; the ingest hook writes those of one upload.
+     */
+    public void updateDeclaredSnapshots(final Map<Long, ComponentLicenseRow> snapshotsByAnalysisId) {
+        if (snapshotsByAnalysisId.isEmpty()) {
+            return;
+        }
+        final PreparedBatch batch = handle.prepareBatch("""
+                UPDATE "COMPONENT_ANALYSIS"
+                   SET "DECLARED_LICENSE_ID" = :declaredLicenseId
+                     , "DECLARED_LICENSE_NAME" = :declaredLicenseName
+                     , "DECLARED_LICENSE_EXPRESSION" = :declaredLicenseExpression
+                 WHERE "ID" = :analysisId
+                """);
+        snapshotsByAnalysisId.forEach((analysisId, row) -> batch
+                .bind("analysisId", analysisId)
+                .bind("declaredLicenseId", row.licenseId())
+                .bind("declaredLicenseName", row.licenseName())
+                .bind("declaredLicenseExpression", row.licenseExpression())
+                .add());
+        batch.execute();
     }
 
     public record ComponentLicenseRow(
