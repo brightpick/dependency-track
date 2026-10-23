@@ -46,7 +46,7 @@ public enum Permissions {
     VULNERABILITY_MANAGEMENT_UPDATE("Allows updating internally-defined vulnerabilities and vulnerability tags"),
     VULNERABILITY_MANAGEMENT_DELETE("Allows management of internally-defined vulnerabilities"),
     POLICY_VIOLATION_ANALYSIS("Provides the ability to make analysis decisions on policy violations"),
-    COMPONENT_ANALYSIS("Provides the ability to make license curation decisions on components: override the declared license and comment on the decision"),
+    COMPONENT_ANALYSIS("Provides the ability to make license curation decisions: override, comment on and delete the license of a component, and manage the component policies that do so across the portfolio"),
     ACCESS_MANAGEMENT("Allows the management of users, teams, and API keys"),
     ACCESS_MANAGEMENT_CREATE("Allows create permissions of users, teams, and API keys"),
     ACCESS_MANAGEMENT_READ("Allows read permissions of users, teams, and API keys"),

@@ -538,9 +538,7 @@ public final class ImportBomActivity implements Activity<ImportBomArg, Void> {
                 // component takes it over: the flag clears and the component
                 // becomes read-only like any other imported component.
                 applyIfChanged(persistentComponent, component, Component::isManuallyCreated, persistentComponent::setManuallyCreated);
-                // A BOM carries no curation: the flag falls back to false with every
-                // import and the analysis applier below sets it again where an
-                // analysis applies — a deleted or retracted analysis leaves nothing behind.
+                // a BOM carries no curation; the analysis applier below sets it again
                 applyIfChanged(persistentComponent, component, Component::isLicenseCurated, persistentComponent::setLicenseCurated);
                 applyIfChanged(persistentComponent, component, Component::getExternalReferences, persistentComponent::setExternalReferences);
                 applyIfChanged(persistentComponent, component, Component::getScope, persistentComponent::setScope);

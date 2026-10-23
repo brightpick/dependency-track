@@ -1,13 +1,12 @@
 -- License curation on components is its own authority: the COMPONENT_ANALYSIS
--- permission, granted to teams like any other, distinct from managing
--- policies. The permission row is normally seeded from the Permissions enum
+-- permission, granted to teams like any other, apart from POLICY_MANAGEMENT. The permission row is normally seeded from the Permissions enum
 -- at start-up; it is created here as well because the seeder grants a team
 -- its permissions only when it creates the team — an Administrators team that
 -- already exists would otherwise never receive the new permission.
 INSERT INTO "PERMISSION" ("NAME", "DESCRIPTION")
 VALUES ('COMPONENT_ANALYSIS',
-        'Provides the ability to make license curation decisions on components: override the declared license and comment on the decision')
-ON CONFLICT ("NAME") DO NOTHING;
+        'Provides the ability to make license curation decisions: override, comment on and delete the license of a component, and manage the component policies that do so across the portfolio')
+ON CONFLICT ("NAME") DO UPDATE SET "DESCRIPTION" = EXCLUDED."DESCRIPTION";
 
 -- Administrators hold every permission; other teams are granted this one
 -- deliberately, by hand.

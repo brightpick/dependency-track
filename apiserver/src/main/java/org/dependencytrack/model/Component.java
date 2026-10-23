@@ -329,11 +329,7 @@ public class Component implements Serializable {
     @Column(name = "MANUALLY_CREATED", allowsNull = "true")
     private Boolean manuallyCreated;
 
-    // True while a durable component analysis (manual or component-policy
-    // license curation) has set the license. Every BOM import resets it while
-    // synchronizing the component's fields; the analysis applier sets it again
-    // where an analysis applies, so a policy condition can tell a human-decided
-    // license from a BOM-declared one. Nullable like INTERNAL: NULL reads as false.
+    // license set by a component analysis; meaning: policy.proto license_curated
     @Persistent
     @Column(name = "LICENSE_CURATED", allowsNull = "true")
     private Boolean licenseCurated;
