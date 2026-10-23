@@ -37,7 +37,7 @@ import org.dependencytrack.resources.AbstractApiResource;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 
 import java.util.ArrayList;
 import java.util.List;

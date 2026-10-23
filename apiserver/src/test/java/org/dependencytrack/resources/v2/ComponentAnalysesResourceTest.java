@@ -30,7 +30,7 @@ import org.dependencytrack.model.Component;
 import org.dependencytrack.model.License;
 import org.dependencytrack.model.Project;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
 

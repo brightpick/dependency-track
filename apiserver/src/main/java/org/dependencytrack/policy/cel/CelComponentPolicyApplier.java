@@ -27,7 +27,7 @@ import org.dependencytrack.model.ComponentProperty;
 import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao.ComponentPolicy;
 import org.dependencytrack.proto.policy.v1.Project;

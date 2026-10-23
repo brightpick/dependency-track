@@ -24,7 +24,7 @@ import org.dependencytrack.parser.spdx.expression.SpdxExpression;
 import org.dependencytrack.parser.spdx.expression.SpdxExpressionParseException;
 import org.dependencytrack.parser.spdx.expression.SpdxExpressionParser;
 import org.dependencytrack.persistence.QueryManager;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.jspecify.annotations.Nullable;
 
 /**

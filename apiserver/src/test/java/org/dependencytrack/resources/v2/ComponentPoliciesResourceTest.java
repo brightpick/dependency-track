@@ -24,7 +24,7 @@ import org.dependencytrack.JerseyTestExtension;
 import org.dependencytrack.ResourceTest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.model.License;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;

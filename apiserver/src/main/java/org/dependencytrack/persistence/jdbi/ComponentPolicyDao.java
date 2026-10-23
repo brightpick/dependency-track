@@ -18,7 +18,7 @@
  */
 package org.dependencytrack.persistence.jdbi;
 
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.mapper.RowMapper;
 import org.jspecify.annotations.Nullable;

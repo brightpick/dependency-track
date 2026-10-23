@@ -28,7 +28,7 @@ import org.dependencytrack.model.License;
 import org.dependencytrack.model.Project;
 import org.dependencytrack.notification.NotificationScope;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.proto.internal.workflow.v1.ImportBomArg;
 import org.junit.jupiter.api.BeforeEach;

@@ -21,6 +21,7 @@ package org.dependencytrack.persistence.jdbi;
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.mapper.RowMapper;
 import org.jdbi.v3.core.statement.PreparedBatch;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
@@ -43,31 +44,6 @@ public final class ComponentAnalysisDao {
 
     public ComponentAnalysisDao(final Handle handle) {
         this.handle = handle;
-    }
-
-    /**
-     * The license an analysis applies — at most one of a resolved license
-     * (incl. custom licenses), an SPDX expression, or a free-text name,
-     * mirroring the component's three license slots. {@link #NONE} carries
-     * no license override (details only).
-     */
-    public record LicenseOverride(
-            @Nullable Long licenseId,
-            @Nullable String licenseExpression,
-            @Nullable String licenseName) {
-
-        public static final LicenseOverride NONE = new LicenseOverride(null, null, null);
-
-        public LicenseOverride {
-            if ((licenseId != null ? 1 : 0) + (licenseExpression != null ? 1 : 0)
-                    + (licenseName != null ? 1 : 0) > 1) {
-                throw new IllegalArgumentException("A license override fills at most one license slot");
-            }
-        }
-
-        public boolean isEmpty() {
-            return licenseId == null && licenseExpression == null && licenseName == null;
-        }
     }
 
     public record ComponentAnalysis(

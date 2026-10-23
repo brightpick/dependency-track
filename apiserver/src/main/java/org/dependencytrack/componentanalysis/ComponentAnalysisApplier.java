@@ -24,7 +24,6 @@ import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentLicenseRow;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

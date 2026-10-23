@@ -32,7 +32,7 @@ import org.dependencytrack.api.v2.model.ListComponentPoliciesResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentPolicyRequest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.exception.AlreadyExistsException;
-import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.LicenseOverride;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.resources.AbstractApiResource;
