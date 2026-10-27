@@ -40,9 +40,8 @@ properties:
   license_expression:
     type: string
     description: |-
-      SPDX license expression of more than one license, applied on match; each
-      license, also on the left of WITH, must be a known SPDX ID or custom
-      license name
+      SPDX license expression, applied on match; each license, also on the
+      left of WITH, must be a known SPDX ID or custom license name
   license_name:
     type: string
     description: Free-text license name applied on match

@@ -734,11 +734,11 @@ class ComponentAnalysesResourceTest extends ResourceTest {
     }
 
     @Test
-    void singleLicenseExpressionIsRejected() {
+    void singleLicenseExpressionIsStoredAsExpression() {
         initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
         final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
         createSpdxLicense("MIT", "MIT License");
-        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+        final Component component = createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
 
         final Response response = upsertAnalysis(/* language=JSON */ """
                 {
@@ -749,9 +749,34 @@ class ComponentAnalysesResourceTest extends ResourceTest {
                   "license_expression": "MIT"
                 }
                 """.formatted(project.getUuid()));
+        assertThat(response.getStatus()).isEqualTo(204);
+
+        qm.getPersistenceManager().evictAll();
+        final Component updatedComponent = qm.getObjectByUuid(Component.class, component.getUuid());
+        assertThat(updatedComponent.getLicenseExpression()).isEqualTo("MIT");
+        assertThat(updatedComponent.getResolvedLicense()).isNull();
+        assertThat(updatedComponent.getLicense()).isNull();
+        assertThat(updatedComponent.isLicenseCurated()).isTrue();
+    }
+
+    @Test
+    void unknownSingleLicenseExpressionIsRejected() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS, Permissions.VIEW_PORTFOLIO);
+        final Project project = qm.createProject("acme-app", null, null, null, null, null, null, false);
+        createComponent(project, "org.acme", "acme-lib", "1.0.0", "Unknown License");
+
+        final Response response = upsertAnalysis(/* language=JSON */ """
+                {
+                  "project_uuid": "%s",
+                  "group": "org.acme",
+                  "name": "acme-lib",
+                  "version": "1.0.0",
+                  "license_expression": "No-Such-License-1.0"
+                }
+                """.formatted(project.getUuid()));
         assertThat(response.getStatus()).isEqualTo(400);
         assertThatJson(getPlainTextBody(response))
-                .node("detail").isString().isEqualTo("MIT is a single license, not an expression; it goes into `license`");
+                .node("detail").isString().startsWith("License No-Such-License-1.0 is not known");
     }
 
     @Test

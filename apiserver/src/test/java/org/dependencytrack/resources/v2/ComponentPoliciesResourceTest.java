@@ -431,6 +431,68 @@ class ComponentPoliciesResourceTest extends ResourceTest {
     }
 
     @Test
+    void shouldCreatePolicyWithSingleLicenseExpression() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "single-license",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(201);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        final String listBody = getPlainTextBody(listResponse);
+        assertThatJson(listBody).node("policies[0].license_expression").isEqualTo("MIT");
+        assertThatJson(listBody).node("policies[0].license").isAbsent();
+    }
+
+    @Test
+    void shouldUpdatePolicyWithSingleLicenseExpression() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+                "acme-curation", null, "tester", true, 0,
+                "component.name == \"acme-lib\"", LicenseOverride.NONE, null, null, null));
+
+        final Response response = jersey
+                .target("/component-policies/" + policyId)
+                .request()
+                .header(X_API_KEY, apiKey)
+                .put(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "acme-curation",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        final String listBody = getPlainTextBody(listResponse);
+        assertThatJson(listBody).node("policies[0].license_expression").isEqualTo("MIT");
+        assertThatJson(listBody).node("policies[0].license").isAbsent();
+    }
+
+    @Test
     void shouldRejectPolicyWithTwoLicenseSlots() {
         initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
         createSpdxLicense("MIT", "MIT License");

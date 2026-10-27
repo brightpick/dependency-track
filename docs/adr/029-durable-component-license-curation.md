@@ -83,9 +83,9 @@ component mutation is removed:
 Later work adds four details to the decision. None of them changes it.
 
 A multi-license is curated as a whole. An override fills one of three license slots that mirror
-the component: a resolved license (`LICENSE_ID`), an SPDX expression of more than one known
-license (`LICENSE_EXPRESSION`), or a free-text name (`LICENSE_NAME`). At most one slot is set,
-and a check constraint on `COMPONENT_ANALYSIS` and `COMPONENT_POLICY` enforces it. Reducing a
+the component: a resolved license (`LICENSE_ID`), an SPDX expression of known licenses
+(`LICENSE_EXPRESSION`), or a free-text name (`LICENSE_NAME`). At most one slot is set, and a
+check constraint on `COMPONENT_ANALYSIS` and `COMPONENT_POLICY` enforces it. Reducing a
 multi-license to one of its members would record a decision nobody made.
 
 Policies can see that a license is curated. `COMPONENT.LICENSE_CURATED` marks a component whose

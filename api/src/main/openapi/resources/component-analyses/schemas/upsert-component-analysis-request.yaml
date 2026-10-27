@@ -38,9 +38,9 @@ properties:
   license_expression:
     type: string
     description: |-
-      SPDX license expression of more than one license; each license, also on
-      the left of WITH, must be a known SPDX ID or custom license name.
-      Curates a multi-license as a whole. A single license goes into license.
+      SPDX license expression; each license, also on the left of WITH, must
+      be a known SPDX ID or custom license name. Curates a multi-license as a
+      whole.
   license_name:
     type: string
     description: Free-text license name, for a value no known license can express

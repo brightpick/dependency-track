@@ -30,9 +30,8 @@ import org.jspecify.annotations.Nullable;
 /**
  * Turns the three license fields of an analysis or component-policy request
  * into a {@link LicenseOverride}: at most one of a license (SPDX ID or custom
- * license name), a well-formed SPDX expression of more than one license whose
- * licenses DT can attach, or a free-text name. None is no override. Anything
- * else is a 400.
+ * license name), a well-formed SPDX expression whose licenses DT can attach,
+ * or a free-text name. None is no override. Anything else is a 400.
  */
 final class LicenseOverrideResolver {
 
@@ -84,8 +83,7 @@ final class LicenseOverrideResolver {
      * The expression must parse — the policy engine evaluates the stored
      * value with the same parser, and a value it cannot parse would make the
      * license conditions silently false — and every license in it must be one
-     * DT can attach. A single license is not an expression: in `license` it
-     * resolves, and the policies see its license and its groups.
+     * DT can attach.
      */
     private static void validateExpression(final QueryManager qm, final String expression) {
         final SpdxExpression parsed;
@@ -95,10 +93,6 @@ final class LicenseOverrideResolver {
             throw new BadRequestException(
                     "Invalid SPDX expression %s: %s — a single license, including a custom one, goes into `license`"
                             .formatted(expression, e.getMessage()));
-        }
-        if (parsed instanceof SpdxExpression.Identifier) {
-            throw new BadRequestException(
-                    "%s is a single license, not an expression; it goes into `license`".formatted(expression));
         }
         requireKnownLicenses(qm, parsed);
     }
