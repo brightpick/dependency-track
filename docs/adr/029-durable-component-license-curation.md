@@ -93,7 +93,7 @@ license an analysis set, and policy conditions read it as `component.license_cur
 import resets the flag while it synchronizes the component fields, and the analysis applier sets
 it again, so a deleted or retracted analysis leaves no flag behind. This adds a second touch point
 in `ImportBomActivity`, next to the applier hook. Component policies run before the applier and
-always see the flag as false, so a component policy condition on it is rejected.
+always see the flag as false.
 
 Curation is its own permission. `COMPONENT_ANALYSIS` covers analyses, their comments and the
 component policies; analyses required `POLICY_MANAGEMENT` before. The migration grants it to the

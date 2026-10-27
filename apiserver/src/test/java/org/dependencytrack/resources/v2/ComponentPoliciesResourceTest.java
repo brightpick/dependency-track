@@ -163,21 +163,43 @@ class ComponentPoliciesResourceTest extends ResourceTest {
     }
 
     @Test
-    void shouldRejectAConditionOnLicenseCurated() {
+    void shouldAcceptAConditionOnLicenseCurated() {
         initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
         createSpdxLicense("Apache-2.0", "Apache License 2.0");
 
         final Response response = jersey.target("/component-policies").request()
                 .header(X_API_KEY, apiKey).post(Entity.json(/* language=JSON */ """
                         {
-                          "name": "never matches",
+                          "name": "uncurated components",
                           "condition": "!component.license_curated",
                           "license": "Apache-2.0"
                         }
                         """));
-        assertThat(response.getStatus()).isEqualTo(400);
-        assertThatJson(getPlainTextBody(response))
-                .node("detail").isString().contains("license_curated");
+        assertThat(response.getStatus()).isEqualTo(201);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        assertThat(response.getLocation()).isNotNull();
+        assertThat(response.getLocation().getPath()).matches(".*/component-policies/\\d+$");
+    }
+
+    @Test
+    void shouldAcceptUpdateWithAConditionOnLicenseCurated() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+                "uncurated components", null, "tester", true, 0,
+                "component.name == \"acme-lib\"", LicenseOverride.NONE, null, null, null));
+
+        final Response response = jersey.target("/component-policies/" + policyId).request()
+                .header(X_API_KEY, apiKey).put(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "uncurated components",
+                          "condition": "!component.license_curated",
+                          "license": "Apache-2.0"
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(getPlainTextBody(response)).isEmpty();
     }
 
     @Test

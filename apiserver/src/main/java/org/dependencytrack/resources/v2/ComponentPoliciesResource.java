@@ -42,7 +42,6 @@ import org.dependencytrack.policy.cel.CelPolicyType;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.inJdbiTransaction;
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.withJdbiHandle;
@@ -58,8 +57,6 @@ import static org.dependencytrack.util.PersistenceUtil.isUniqueConstraintViolati
  */
 @Provider
 public final class ComponentPoliciesResource extends AbstractApiResource implements ComponentPoliciesApi {
-
-    private static final Pattern LICENSE_CURATED = Pattern.compile("\\blicense_curated\\b");
 
     @Context
     private UriInfo uriInfo;
@@ -156,16 +153,9 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     /**
-     * The condition must compile as a component policy condition, and must
-     * not read {@code component.license_curated}: every import resets that
-     * flag before the component policies run, so such a condition would
-     * never match.
+     * The condition must compile as a component policy condition.
      */
     private static void validateCondition(final String condition) {
-        if (LICENSE_CURATED.matcher(condition).find()) {
-            throw new BadRequestException(
-                    "component.license_curated is always false in a component policy condition");
-        }
         try {
             CelPolicyCompiler.getInstance(CelPolicyType.COMPONENT)
                     .compile(condition, CelPolicyCompiler.CacheMode.NO_CACHE);

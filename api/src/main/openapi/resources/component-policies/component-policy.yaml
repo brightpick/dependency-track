@@ -26,8 +26,6 @@ put:
   operationId: updateComponentPolicy
   summary: Update a component policy
   description: |-
-    A condition on `component.license_curated` is rejected with a 400: every
-    import resets the flag before the component policies run.
     Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies
