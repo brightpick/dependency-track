@@ -48,7 +48,7 @@ post:
   operationId: createComponentAnalysisComment
   summary: Add a comment to a component analysis
   description: |-
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `COMPONENT_ANALYSIS`.
   tags:
     - Component Analyses
   requestBody:

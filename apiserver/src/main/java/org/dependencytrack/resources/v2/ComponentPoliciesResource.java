@@ -31,7 +31,8 @@ import org.dependencytrack.api.v2.model.ComponentPolicy;
 import org.dependencytrack.api.v2.model.ListComponentPoliciesResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentPolicyRequest;
 import org.dependencytrack.auth.Permissions;
-import org.dependencytrack.model.License;
+import org.dependencytrack.exception.AlreadyExistsException;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.resources.AbstractApiResource;
@@ -40,12 +41,19 @@ import org.dependencytrack.policy.cel.CelPolicyType;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.inJdbiTransaction;
 import static org.dependencytrack.persistence.jdbi.JdbiFactory.withJdbiHandle;
+import static org.dependencytrack.util.PersistenceUtil.isUniqueConstraintViolation;
 
 /**
  * REST resource for component policies (automated license curation rules).
+ * <p>
+ * A component policy is curation at scale — it writes the same component
+ * analyses a manual override does — so the curation permission grants it,
+ * next to policy management. The portfolio gate policies stay with policy
+ * management alone.
  */
 @Provider
 public final class ComponentPoliciesResource extends AbstractApiResource implements ComponentPoliciesApi {
@@ -54,7 +62,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     private UriInfo uriInfo;
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response listComponentPolicies() {
         final List<ComponentPolicyDao.ComponentPolicy> policies = withJdbiHandle(
                 handle -> new ComponentPolicyDao(handle).getAll());
@@ -68,18 +76,22 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response createComponentPolicy(final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
-            final Long licenseId = resolveLicenseId(qm, request.getLicense());
-            final long id = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
+            final long id = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
+                final var dao = new ComponentPolicyDao(handle);
+                return dao.create(
                     request.getName(), request.getDescription(), getPrincipal().getName(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
-                    request.getCondition(), licenseId, request.getDetails(),
+                    request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
-                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
+                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null);
+            }));
             return Response.created(uriInfo.getBaseUriBuilder()
                             .path("/component-policies")
                             .path(String.valueOf(id))
@@ -89,18 +101,22 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response updateComponentPolicy(final Long id, final UpsertComponentPolicyRequest request) {
         validateCondition(request.getCondition());
         try (final var qm = new QueryManager()) {
-            final Long licenseId = resolveLicenseId(qm, request.getLicense());
-            final boolean updated = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).update(
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
+            final boolean updated = orNameConflict(request.getName(), () -> inJdbiTransaction(handle -> {
+                final var dao = new ComponentPolicyDao(handle);
+                return dao.update(
                     id, request.getName(), request.getDescription(),
                     Objects.requireNonNullElse(request.getEnabled(), true),
                     Objects.requireNonNullElse(request.getPriority(), 0),
-                    request.getCondition(), licenseId, request.getDetails(),
+                    request.getCondition(), override, request.getDetails(),
                     request.getValidFrom() != null ? request.getValidFrom().toInstant() : null,
-                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null));
+                    request.getValidUntil() != null ? request.getValidUntil().toInstant() : null);
+            }));
             if (!updated) {
                 throw new NotFoundException();
             }
@@ -109,7 +125,7 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired({Permissions.Constants.POLICY_MANAGEMENT, Permissions.Constants.COMPONENT_ANALYSIS})
     public Response deleteComponentPolicy(final Long id) {
         final boolean deleted = inJdbiTransaction(
                 handle -> new ComponentPolicyDao(handle).delete(id));
@@ -119,6 +135,26 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
         return Response.noContent().build();
     }
 
+    /**
+     * Policy names are unique: the unique index rejects a taken name, and
+     * that is a 409 naming the name, not a database error. An update of an
+     * unknown id changes no row, so it stays a 404 whatever its name.
+     */
+    private static <T> T orNameConflict(final String name, final Supplier<T> action) {
+        try {
+            return action.get();
+        } catch (RuntimeException e) {
+            if (isUniqueConstraintViolation(e)) {
+                throw new AlreadyExistsException(
+                        "A component policy named \"%s\" already exists".formatted(name), e);
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * The condition must compile as a component policy condition.
+     */
     private static void validateCondition(final String condition) {
         try {
             CelPolicyCompiler.getInstance(CelPolicyType.COMPONENT)
@@ -128,29 +164,10 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
         }
     }
 
-    private static Long resolveLicenseId(final QueryManager qm, final String licenseIdOrName) {
-        if (licenseIdOrName == null) {
-            return null;
-        }
-        final License license = qm.getLicenseByIdOrName(licenseIdOrName);
-        if (license != null && license != License.UNRESOLVED) {
-            return license.getId();
-        }
-        final License customLicense = qm.getCustomLicenseByName(licenseIdOrName);
-        if (customLicense != null && customLicense != License.UNRESOLVED) {
-            return customLicense.getId();
-        }
-        throw new BadRequestException("License %s is not known; create it as a custom license first".formatted(licenseIdOrName));
-    }
-
     private static ComponentPolicy mapPolicy(final QueryManager qm, final ComponentPolicyDao.ComponentPolicy policy) {
-        String license = null;
-        if (policy.licenseId() != null) {
-            final License resolved = qm.getObjectById(License.class, policy.licenseId());
-            if (resolved != null) {
-                license = resolved.getLicenseId() != null ? resolved.getLicenseId() : resolved.getName();
-            }
-        }
+        final String license = policy.licenseId() != null
+                ? LicenseOverrideResolver.licenseLabel(qm, policy.licenseId())
+                : null;
         return ComponentPolicy.builder()
                 .id(policy.id())
                 .name(policy.name())
@@ -160,6 +177,8 @@ public final class ComponentPoliciesResource extends AbstractApiResource impleme
                 .priority(policy.priority())
                 .condition(policy.condition())
                 .license(license)
+                .licenseExpression(policy.licenseExpression())
+                .licenseName(policy.licenseName())
                 .details(policy.details())
                 .validFrom(policy.validFrom() != null
                         ? policy.validFrom().atOffset(java.time.ZoneOffset.UTC) : null)

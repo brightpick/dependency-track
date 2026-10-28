@@ -102,6 +102,13 @@ message Component {
   // available immediately. Policies should explicitly check presence using the has() macro.
   optional google.protobuf.Timestamp latest_version_published_at = 59;
 
+  // Whether the license was set by a durable component analysis (manual or
+  // component-policy license curation) rather than declared by the uploaded BOM.
+  // Reflects the persisted component: every import resets it before the
+  // component policies run, so their conditions see false; the portfolio
+  // policies, evaluated after the analyses are applied, see the real value.
+  optional bool license_curated = 60;
+
   message Property {
     string group = 1;
     string name = 2;

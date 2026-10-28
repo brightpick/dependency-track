@@ -538,6 +538,8 @@ public final class ImportBomActivity implements Activity<ImportBomArg, Void> {
                 // component takes it over: the flag clears and the component
                 // becomes read-only like any other imported component.
                 applyIfChanged(persistentComponent, component, Component::isManuallyCreated, persistentComponent::setManuallyCreated);
+                // a BOM carries no curation; the analysis applier below sets it again
+                applyIfChanged(persistentComponent, component, Component::isLicenseCurated, persistentComponent::setLicenseCurated);
                 applyIfChanged(persistentComponent, component, Component::getExternalReferences, persistentComponent::setExternalReferences);
                 applyIfChanged(persistentComponent, component, Component::getScope, persistentComponent::setScope);
 
@@ -584,6 +586,7 @@ public final class ImportBomActivity implements Activity<ImportBomArg, Void> {
         CelComponentPolicyApplier.applyPolicies(project, persistentComponentByIdentity.values());
         final var componentAnalysisApplier = ComponentAnalysisApplier.forProject(qm, project.getId());
         persistentComponentByIdentity.values().forEach(componentAnalysisApplier::apply);
+        componentAnalysisApplier.writeSnapshots();
         qm.getPersistenceManager().flush();
 
         return persistentComponentByIdentity;

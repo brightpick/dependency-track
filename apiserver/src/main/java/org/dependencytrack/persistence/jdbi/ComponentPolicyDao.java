@@ -18,6 +18,7 @@
  */
 package org.dependencytrack.persistence.jdbi;
 
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.jdbi.v3.core.Handle;
 import org.jdbi.v3.core.mapper.RowMapper;
 import org.jspecify.annotations.Nullable;
@@ -46,9 +47,15 @@ public final class ComponentPolicyDao {
             int priority,
             String condition,
             @Nullable Long licenseId,
+            @Nullable String licenseExpression,
+            @Nullable String licenseName,
             @Nullable String details,
             @Nullable Instant validFrom,
             @Nullable Instant validUntil) {
+
+        public LicenseOverride override() {
+            return new LicenseOverride(licenseId, licenseExpression, licenseName);
+        }
     }
 
     private static final RowMapper<ComponentPolicy> ROW_MAPPER = (rs, ctx) -> new ComponentPolicy(
@@ -60,14 +67,16 @@ public final class ComponentPolicyDao {
             rs.getInt("PRIORITY"),
             rs.getString("CONDITION"),
             rs.getObject("LICENSE_ID", Long.class),
+            rs.getString("LICENSE_EXPRESSION"),
+            rs.getString("LICENSE_NAME"),
             rs.getString("DETAILS"),
             rs.getTimestamp("VALID_FROM") != null ? rs.getTimestamp("VALID_FROM").toInstant() : null,
             rs.getTimestamp("VALID_UNTIL") != null ? rs.getTimestamp("VALID_UNTIL").toInstant() : null);
 
     private static final String SELECT = """
             SELECT "ID", "NAME", "DESCRIPTION", "AUTHOR", "ENABLED",
-                   "PRIORITY", "CONDITION", "LICENSE_ID", "DETAILS",
-                   "VALID_FROM", "VALID_UNTIL"
+                   "PRIORITY", "CONDITION", "LICENSE_ID", "LICENSE_EXPRESSION",
+                   "LICENSE_NAME", "DETAILS", "VALID_FROM", "VALID_UNTIL"
               FROM "COMPONENT_POLICY"
             """;
 
@@ -107,19 +116,19 @@ public final class ComponentPolicyDao {
             final boolean enabled,
             final int priority,
             final String condition,
-            @Nullable final Long licenseId,
+            final LicenseOverride override,
             @Nullable final String details,
             @Nullable final Instant validFrom,
             @Nullable final Instant validUntil) {
         return handle.createQuery("""
                         INSERT INTO "COMPONENT_POLICY"
                           ("NAME", "DESCRIPTION", "AUTHOR", "ENABLED",
-                           "PRIORITY", "CONDITION", "LICENSE_ID", "DETAILS",
-                           "VALID_FROM", "VALID_UNTIL")
+                           "PRIORITY", "CONDITION", "LICENSE_ID", "LICENSE_EXPRESSION",
+                           "LICENSE_NAME", "DETAILS", "VALID_FROM", "VALID_UNTIL")
                         VALUES
                           (:name, :description, :author, :enabled,
-                           :priority, :condition, :licenseId, :details,
-                           :validFrom, :validUntil)
+                           :priority, :condition, :licenseId, :licenseExpression,
+                           :licenseName, :details, :validFrom, :validUntil)
                         RETURNING "ID"
                         """)
                 .bind("name", name)
@@ -128,7 +137,9 @@ public final class ComponentPolicyDao {
                 .bind("enabled", enabled)
                 .bind("priority", priority)
                 .bind("condition", condition)
-                .bind("licenseId", licenseId)
+                .bind("licenseId", override.licenseId())
+                .bind("licenseExpression", override.licenseExpression())
+                .bind("licenseName", override.licenseName())
                 .bind("details", details)
                 .bind("validFrom", validFrom)
                 .bind("validUntil", validUntil)
@@ -143,7 +154,7 @@ public final class ComponentPolicyDao {
             final boolean enabled,
             final int priority,
             final String condition,
-            @Nullable final Long licenseId,
+            final LicenseOverride override,
             @Nullable final String details,
             @Nullable final Instant validFrom,
             @Nullable final Instant validUntil) {
@@ -155,6 +166,8 @@ public final class ComponentPolicyDao {
                              , "PRIORITY" = :priority
                              , "CONDITION" = :condition
                              , "LICENSE_ID" = :licenseId
+                             , "LICENSE_EXPRESSION" = :licenseExpression
+                             , "LICENSE_NAME" = :licenseName
                              , "DETAILS" = :details
                              , "VALID_FROM" = :validFrom
                              , "VALID_UNTIL" = :validUntil
@@ -167,7 +180,9 @@ public final class ComponentPolicyDao {
                 .bind("enabled", enabled)
                 .bind("priority", priority)
                 .bind("condition", condition)
-                .bind("licenseId", licenseId)
+                .bind("licenseId", override.licenseId())
+                .bind("licenseExpression", override.licenseExpression())
+                .bind("licenseName", override.licenseName())
                 .bind("details", details)
                 .bind("validFrom", validFrom)
                 .bind("validUntil", validUntil)

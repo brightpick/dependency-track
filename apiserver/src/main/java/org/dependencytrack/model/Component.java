@@ -329,6 +329,11 @@ public class Component implements Serializable {
     @Column(name = "MANUALLY_CREATED", allowsNull = "true")
     private Boolean manuallyCreated;
 
+    // license set by a component analysis; meaning: policy.proto license_curated
+    @Persistent
+    @Column(name = "LICENSE_CURATED", allowsNull = "true")
+    private Boolean licenseCurated;
+
     @Persistent
     @Column(name = "DESCRIPTION", jdbcType = "VARCHAR", length = 1024)
     @Size(max = 1024)
@@ -724,6 +729,17 @@ public class Component implements Serializable {
 
     public void setManuallyCreated(boolean manuallyCreated) {
         this.manuallyCreated = manuallyCreated;
+    }
+
+    public boolean isLicenseCurated() {
+        if (licenseCurated == null) {
+            return false;
+        }
+        return licenseCurated;
+    }
+
+    public void setLicenseCurated(boolean licenseCurated) {
+        this.licenseCurated = licenseCurated;
     }
 
     public String getDescription() {

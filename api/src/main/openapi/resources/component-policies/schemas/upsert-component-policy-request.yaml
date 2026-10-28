@@ -34,7 +34,17 @@ properties:
     description: CEL expression over component, project, now
   license:
     type: string
-    description: SPDX license ID or custom license name applied on match
+    description: |-
+      SPDX license ID or custom license name applied on match. At most one of
+      license, license_expression and license_name may be set.
+  license_expression:
+    type: string
+    description: |-
+      SPDX license expression, applied on match; each license, also on the
+      left of WITH, must be a known SPDX ID or custom license name
+  license_name:
+    type: string
+    description: Free-text license name applied on match
   details:
     type: string
     description: Free-text note written onto matched components

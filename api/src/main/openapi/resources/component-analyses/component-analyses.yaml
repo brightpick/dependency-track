@@ -52,11 +52,13 @@ put:
   description: |-
     Creates or updates the analysis of the component identified by
     purl or group/name/version within the project given as project_uuid.
-    The license override is an SPDX license ID or custom license name;
-    changes are recorded in the analysis audit trail. The curation is
+    The license override is at most one of a resolved license (SPDX ID or
+    custom license name), an SPDX expression of known licenses, or a
+    free-text name; changes are recorded in the analysis
+    audit trail. The curation is
     re-applied on every BOM ingest.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `COMPONENT_ANALYSIS`.
   tags:
     - Component Analyses
   requestBody:

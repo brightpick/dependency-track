@@ -21,7 +21,7 @@ get:
     Returns all component policies in evaluation order
     'priority ascending, name ascending'.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies
   responses:
@@ -47,7 +47,7 @@ post:
     curation with the given license and details. Manual curations always
     win over policies.
 
-    Requires permission `POLICY_MANAGEMENT`.
+    Requires permission `POLICY_MANAGEMENT` or `COMPONENT_ANALYSIS`.
   tags:
     - Component Policies
   requestBody:

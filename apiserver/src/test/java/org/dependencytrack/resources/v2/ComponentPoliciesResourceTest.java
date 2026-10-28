@@ -24,6 +24,7 @@ import org.dependencytrack.JerseyTestExtension;
 import org.dependencytrack.ResourceTest;
 import org.dependencytrack.auth.Permissions;
 import org.dependencytrack.model.License;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
@@ -94,6 +95,114 @@ class ComponentPoliciesResourceTest extends ResourceTest {
     }
 
     @Test
+    void shouldCreateAndListComponentPolicyWithTheCurationPermissionAlone() {
+        // curation at scale: the curation permission suffices, policy management is not needed
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "acme-curation",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license": "Apache-2.0",
+                          "enabled": true,
+                          "priority": 5
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(201);
+
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        assertThat(listResponse.getStatus()).isEqualTo(200);
+    }
+
+    @Test
+    void shouldRejectATakenPolicyNameWithConflict() {
+        initializeWithPermissions(Permissions.COMPONENT_ANALYSIS);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+        final String body = /* language=JSON */ """
+                {
+                  "name": "curation pkg:pypi/acme@1",
+                  "condition": "component.purl == \\"pkg:pypi/acme@1\\"",
+                  "license": "Apache-2.0",
+                  "enabled": true,
+                  "priority": 50
+                }
+                """;
+        final Response first = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body));
+        assertThat(first.getStatus()).isEqualTo(201);
+
+        // the same name again — the button in the audit panel clicked twice
+        final Response second = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body));
+        assertThat(second.getStatus()).isEqualTo(409);
+        assertThatJson(getPlainTextBody(second))
+                .node("detail").isString().contains("curation pkg:pypi/acme@1");
+
+        // renaming another policy onto the taken name is the same conflict
+        final Response other = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(body.replace("curation pkg:pypi/acme@1", "other")));
+        assertThat(other.getStatus()).isEqualTo(201);
+        final String otherId = other.getLocation().getPath().replaceAll(".*/", "");
+        final Response renamed = jersey.target("/component-policies/" + otherId).request()
+                .header(X_API_KEY, apiKey).put(Entity.json(body));
+        assertThat(renamed.getStatus()).isEqualTo(409);
+
+        // an unknown id is a 404, also with a taken name
+        final Response unknown = jersey.target("/component-policies/999999").request()
+                .header(X_API_KEY, apiKey).put(Entity.json(body));
+        assertThat(unknown.getStatus()).isEqualTo(404);
+    }
+
+    @Test
+    void shouldAcceptAConditionOnLicenseCurated() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final Response response = jersey.target("/component-policies").request()
+                .header(X_API_KEY, apiKey).post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "uncurated components",
+                          "condition": "!component.license_curated",
+                          "license": "Apache-2.0"
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(201);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        assertThat(response.getLocation()).isNotNull();
+        assertThat(response.getLocation().getPath()).matches(".*/component-policies/\\d+$");
+    }
+
+    @Test
+    void shouldAcceptUpdateWithAConditionOnLicenseCurated() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+                "uncurated components", null, "tester", true, 0,
+                "component.name == \"acme-lib\"", LicenseOverride.NONE, null, null, null));
+
+        final Response response = jersey.target("/component-policies/" + policyId).request()
+                .header(X_API_KEY, apiKey).put(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "uncurated components",
+                          "condition": "!component.license_curated",
+                          "license": "Apache-2.0"
+                        }
+                        """));
+        assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(getPlainTextBody(response)).isEmpty();
+    }
+
+    @Test
     void shouldRejectCreateWithInvalidCelCondition() {
         initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
 
@@ -145,9 +254,9 @@ class ComponentPoliciesResourceTest extends ResourceTest {
         inJdbiTransaction(handle -> {
             final var dao = new ComponentPolicyDao(handle);
             dao.create("second-policy", null, "tester", true, 2,
-                    "component.name == \"bar\"", null, null, null, null);
+                    "component.name == \"bar\"", LicenseOverride.NONE, null, null, null);
             return dao.create("first-policy", null, "tester", false, 1,
-                    "component.name == \"foo\"", null, null, null, null);
+                    "component.name == \"foo\"", LicenseOverride.NONE, null, null, null);
         });
 
         final Response response = jersey
@@ -188,7 +297,7 @@ class ComponentPoliciesResourceTest extends ResourceTest {
 
         final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
                 "acme-curation", null, "tester", true, 0,
-                "component.name == \"acme-lib\"", null, null, null, null));
+                "component.name == \"acme-lib\"", LicenseOverride.NONE, null, null, null));
 
         final Response response = jersey
                 .target("/component-policies/" + policyId)
@@ -263,7 +372,7 @@ class ComponentPoliciesResourceTest extends ResourceTest {
 
         final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
                 "to-be-deleted", null, "tester", true, 0,
-                "component.name == \"foo\"", null, null, null, null));
+                "component.name == \"foo\"", LicenseOverride.NONE, null, null, null));
 
         final Response response = jersey
                 .target("/component-policies/" + policyId)
@@ -312,6 +421,145 @@ class ComponentPoliciesResourceTest extends ResourceTest {
                         }
                         """));
         assertThat(createResponse.getStatus()).isEqualTo(403);
+    }
+
+    @Test
+    void shouldCreatePolicyWithExpressionOverride() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+        createSpdxLicense("Apache-2.0", "Apache License 2.0");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "dual-license",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT OR Apache-2.0"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(201);
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        final String listBody = getPlainTextBody(listResponse);
+        assertThatJson(listBody).node("policies[0].license_expression").isEqualTo("MIT OR Apache-2.0");
+        assertThatJson(listBody).node("policies[0].license").isAbsent();
+    }
+
+    @Test
+    void shouldCreatePolicyWithSingleLicenseExpression() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "single-license",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(201);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        final String listBody = getPlainTextBody(listResponse);
+        assertThatJson(listBody).node("policies[0].license_expression").isEqualTo("MIT");
+        assertThatJson(listBody).node("policies[0].license").isAbsent();
+    }
+
+    @Test
+    void shouldUpdatePolicyWithSingleLicenseExpression() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final long policyId = inJdbiTransaction(handle -> new ComponentPolicyDao(handle).create(
+                "acme-curation", null, "tester", true, 0,
+                "component.name == \"acme-lib\"", LicenseOverride.NONE, null, null, null));
+
+        final Response response = jersey
+                .target("/component-policies/" + policyId)
+                .request()
+                .header(X_API_KEY, apiKey)
+                .put(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "acme-curation",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(204);
+        assertThat(getPlainTextBody(response)).isEmpty();
+        final Response listResponse = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .get();
+        final String listBody = getPlainTextBody(listResponse);
+        assertThatJson(listBody).node("policies[0].license_expression").isEqualTo("MIT");
+        assertThatJson(listBody).node("policies[0].license").isAbsent();
+    }
+
+    @Test
+    void shouldRejectPolicyWithTwoLicenseSlots() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "two-slots",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license": "MIT",
+                          "license_name": "Acme EULA"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().startsWith("At most one of license");
+        final List<ComponentPolicyDao.ComponentPolicy> policies = withJdbiHandle(
+                handle -> new ComponentPolicyDao(handle).getAll());
+        assertThat(policies).isEmpty();
+    }
+
+    @Test
+    void shouldRejectPolicyExpressionWithUnknownOperand() {
+        initializeWithPermissions(Permissions.POLICY_MANAGEMENT);
+        createSpdxLicense("MIT", "MIT License");
+
+        final Response response = jersey
+                .target("/component-policies")
+                .request()
+                .header(X_API_KEY, apiKey)
+                .post(Entity.json(/* language=JSON */ """
+                        {
+                          "name": "unknown-operand",
+                          "condition": "component.name == \\"acme-lib\\"",
+                          "license_expression": "MIT OR No-Such-License-1.0"
+                        }
+                        """));
+
+        assertThat(response.getStatus()).isEqualTo(400);
+        assertThatJson(getPlainTextBody(response))
+                .node("detail").isString().startsWith("License No-Such-License-1.0 is not known");
     }
 
     private License createSpdxLicense(final String licenseId, final String name) {

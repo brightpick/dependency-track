@@ -27,6 +27,7 @@ import org.dependencytrack.model.ComponentProperty;
 import org.dependencytrack.model.License;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao;
 import org.dependencytrack.persistence.jdbi.ComponentPolicyDao.ComponentPolicy;
 import org.dependencytrack.proto.policy.v1.Project;
@@ -117,6 +118,7 @@ public final class CelComponentPolicyApplier {
                 builder.setSwidTagId(component.getSwidTagId());
             }
             builder.setIsInternal(component.isInternal());
+            builder.setLicenseCurated(component.isLicenseCurated());
             if (component.getLicense() != null) {
                 builder.setLicenseName(component.getLicense());
             }
@@ -221,7 +223,7 @@ public final class CelComponentPolicyApplier {
             final var dao = new ComponentAnalysisDao(handle);
             for (final ComponentAnalysisDao.ComponentAnalysis analysis : dao.getAllByProject(projectId)) {
                 if (analysis.policyId() == null
-                        || (analysis.licenseId() == null && analysis.details() == null)) {
+                        || (analysis.override().isEmpty() && analysis.details() == null)) {
                     continue;
                 }
                 final String key = identityKey(analysis.purl(), analysis.group(),
@@ -232,7 +234,7 @@ public final class CelComponentPolicyApplier {
                 dao.upsertPolicyAnalysis(
                         projectId, analysis.purl(), analysis.group(),
                         analysis.name(), analysis.version(),
-                        null, null, analysis.policyId());
+                        LicenseOverride.NONE, null, analysis.policyId());
                 final ComponentPolicy policy = policiesById.get(analysis.policyId());
                 final String commenter = policy != null
                         ? policyCommenter(policy)
@@ -240,10 +242,10 @@ public final class CelComponentPolicyApplier {
                 final var comments = new java.util.ArrayList<CreateCommentCommand>();
                 comments.add(new CreateCommentCommand(analysis.id(), commenter,
                         "Retracted: condition no longer matches; the imported license applies"));
-                if (analysis.licenseId() != null) {
+                if (!analysis.override().isEmpty()) {
                     comments.add(new CreateCommentCommand(analysis.id(), commenter,
                             "License override: %s → not set".formatted(
-                                    licenseLabel(handle, analysis.licenseId()))));
+                                    overrideLabel(handle, analysis.override()))));
                 }
                 if (analysis.details() != null) {
                     comments.add(new CreateCommentCommand(analysis.id(), commenter,
@@ -277,6 +279,23 @@ public final class CelComponentPolicyApplier {
                 .orElse("unknown");
     }
 
+    /**
+     * Display label of an override: the license label, the expression, the
+     * free-text name, or "not set".
+     */
+    private static String overrideLabel(final org.jdbi.v3.core.Handle handle, final LicenseOverride override) {
+        if (override.licenseId() != null) {
+            return licenseLabel(handle, override.licenseId());
+        }
+        if (override.licenseExpression() != null) {
+            return override.licenseExpression();
+        }
+        if (override.licenseName() != null) {
+            return override.licenseName();
+        }
+        return "not set";
+    }
+
     private static String identityKey(final String purl, final String group,
                                       final String name, final String version) {
         return String.join("|",
@@ -301,7 +320,7 @@ public final class CelComponentPolicyApplier {
                 return null;    // manual analysis wins
             }
             if (existing != null
-                    && Objects.equals(existing.licenseId(), policy.licenseId())
+                    && Objects.equals(existing.override(), policy.override())
                     && Objects.equals(existing.details(), policy.details())
                     && Objects.equals(existing.policyId(), policy.id())) {
                 return null;    // already converged, keep the audit trail quiet
@@ -309,7 +328,7 @@ public final class CelComponentPolicyApplier {
             final Long analysisId = dao.upsertPolicyAnalysis(
                     projectId, purl, component.getGroup(),
                     component.getName(), component.getVersion(),
-                    policy.licenseId(), policy.details(), policy.id()).orElse(null);
+                    policy.override(), policy.details(), policy.id()).orElse(null);
             if (analysisId == null) {
                 return null;    // raced by a manual analysis
             }
@@ -317,12 +336,12 @@ public final class CelComponentPolicyApplier {
             final var comments = new java.util.ArrayList<CreateCommentCommand>();
             comments.add(new CreateCommentCommand(analysisId, commenter,
                     "Matched on condition: " + policy.condition()));
-            final Long oldLicenseId = existing != null ? existing.licenseId() : null;
-            if (!Objects.equals(oldLicenseId, policy.licenseId())) {
+            final LicenseOverride oldOverride = existing != null ? existing.override() : LicenseOverride.NONE;
+            if (!Objects.equals(oldOverride, policy.override())) {
                 comments.add(new CreateCommentCommand(analysisId, commenter,
                         "License override: %s → %s".formatted(
-                                licenseLabel(handle, oldLicenseId),
-                                licenseLabel(handle, policy.licenseId()))));
+                                overrideLabel(handle, oldOverride),
+                                overrideLabel(handle, policy.override()))));
             }
             final String oldDetails = existing != null ? existing.details() : null;
             if (!Objects.equals(oldDetails, policy.details())) {

@@ -19,7 +19,6 @@
 package org.dependencytrack.resources.v2;
 
 import alpine.server.auth.PermissionRequired;
-import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
@@ -32,12 +31,13 @@ import org.dependencytrack.api.v2.model.ListComponentAnalysesResponse;
 import org.dependencytrack.api.v2.model.ListComponentAnalysisCommentsResponse;
 import org.dependencytrack.api.v2.model.UpsertComponentAnalysisRequest;
 import org.dependencytrack.auth.Permissions;
-import org.dependencytrack.model.License;
+import org.dependencytrack.model.Project;
 import org.dependencytrack.persistence.QueryManager;
 import org.dependencytrack.resources.AbstractApiResource;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.ComponentAnalysis;
 import org.dependencytrack.persistence.jdbi.ComponentAnalysisDao.CreateCommentCommand;
+import org.dependencytrack.componentanalysis.LicenseOverride;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,30 +59,25 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     @Override
     @PermissionRequired(Permissions.Constants.VIEW_PORTFOLIO)
     public Response listComponentAnalyses(final UUID project) {
-        final long projectId = requireProjectId(project);
-        final List<ComponentAnalysis> analyses = withJdbiHandle(
-                handle -> new ComponentAnalysisDao(handle).getAllByProject(projectId));
-        final var items = new ArrayList<org.dependencytrack.api.v2.model.ComponentAnalysis>(analyses.size());
         try (final var qm = new QueryManager()) {
+            final long projectId = requireProject(qm, project).getId();
+            final List<ComponentAnalysis> analyses = withJdbiHandle(
+                    handle -> new ComponentAnalysisDao(handle).getAllByProject(projectId));
+            final var items = new ArrayList<org.dependencytrack.api.v2.model.ComponentAnalysis>(analyses.size());
             for (final ComponentAnalysis analysis : analyses) {
                 items.add(mapAnalysis(qm, analysis));
             }
+            return Response.ok(ListComponentAnalysesResponse.builder().analyses(items).build()).build();
         }
-        return Response.ok(ListComponentAnalysesResponse.builder().analyses(items).build()).build();
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response updateComponentAnalysis(final UpsertComponentAnalysisRequest request) {
-        final long projectId = requireProjectId(request.getProjectUuid());
-
         try (final var qm = new QueryManager()) {
-            final Long licenseId;
-            if (request.getLicense() != null) {
-                licenseId = resolveLicense(qm, request.getLicense()).getId();
-            } else {
-                licenseId = null;
-            }
+            final long projectId = requireProject(qm, request.getProjectUuid()).getId();
+            final LicenseOverride override = LicenseOverrideResolver.resolve(
+                    qm, request.getLicense(), request.getLicenseExpression(), request.getLicenseName());
 
             final String commenter = getPrincipal().getName();
             inJdbiTransaction(handle -> {
@@ -93,14 +88,14 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 final long id = dao.upsert(
                         projectId, request.getPurl(), request.getGroup(),
                         request.getName(), request.getVersion(),
-                        licenseId, request.getDetails());
+                        override, request.getDetails());
                 final var comments = new ArrayList<CreateCommentCommand>();
-                final Long oldLicenseId = existing != null ? existing.licenseId() : null;
-                if (!Objects.equals(oldLicenseId, licenseId)) {
+                final LicenseOverride oldOverride = existing != null ? existing.override() : LicenseOverride.NONE;
+                if (!Objects.equals(oldOverride, override)) {
                     comments.add(new CreateCommentCommand(id, commenter,
                             "License override: %s → %s".formatted(
-                                    oldLicenseId != null ? licenseLabel(qm, oldLicenseId) : "not set",
-                                    request.getLicense() != null ? request.getLicense() : "not set")));
+                                    LicenseOverrideResolver.label(qm, oldOverride),
+                                    LicenseOverrideResolver.label(qm, override))));
                 }
                 final String oldDetails = existing != null ? existing.details() : null;
                 if (!Objects.equals(oldDetails, request.getDetails())) {
@@ -112,10 +107,10 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 if (!comments.isEmpty()) {
                     dao.createComments(comments);
                 }
-                if (licenseId != null) {
+                if (!override.isEmpty()) {
                     // first override on this component: snapshot the uploaded
                     // license so clearing can restore it instantly
-                    if (existing == null || existing.licenseId() == null) {
+                    if (oldOverride.isEmpty()) {
                         dao.getComponentLicense(
                                 projectId, request.getPurl(), request.getGroup(),
                                 request.getName(), request.getVersion())
@@ -126,9 +121,9 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                     dao.applyToComponents(
                             projectId, request.getPurl(), request.getGroup(),
                             request.getName(), request.getVersion(),
-                            licenseId, request.getDetails());
+                            override, request.getDetails());
                 } else {
-                    if (existing != null && existing.licenseId() != null) {
+                    if (!oldOverride.isEmpty()) {
                         dao.restoreDeclaredLicense(
                                 projectId, request.getPurl(), request.getGroup(),
                                 request.getName(), request.getVersion(),
@@ -139,7 +134,7 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                     dao.applyToComponents(
                             projectId, request.getPurl(), request.getGroup(),
                             request.getName(), request.getVersion(),
-                            /* licenseId */ null, request.getDetails());
+                            LicenseOverride.NONE, request.getDetails());
                 }
                 return null;
             });
@@ -148,19 +143,35 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response deleteComponentAnalysis(final Long id) {
-        final boolean deleted = inJdbiTransaction(
-                handle -> new ComponentAnalysisDao(handle).delete(id));
-        if (!deleted) {
-            throw new NotFoundException();
+        final ComponentAnalysis analysis;
+        try (final var qm = new QueryManager()) {
+            analysis = requireAnalysis(qm, id);
         }
+        inJdbiTransaction(handle -> {
+            final var dao = new ComponentAnalysisDao(handle);
+            // a component that carries the decision gets its uploaded license
+            // back, also an empty one, and also when the decision's license has
+            // since left the catalogue
+            dao.restoreDeclaredLicense(
+                    analysis.projectId(), analysis.purl(), analysis.group(),
+                    analysis.name(), analysis.version(),
+                    analysis.declaredLicenseId(),
+                    analysis.declaredLicenseName(),
+                    analysis.declaredLicenseExpression());
+            dao.delete(analysis.id());
+            return null;
+        });
         return Response.noContent().build();
     }
 
     @Override
     @PermissionRequired(Permissions.Constants.VIEW_PORTFOLIO)
     public Response listComponentAnalysisComments(final Long id) {
+        try (final var qm = new QueryManager()) {
+            requireAnalysis(qm, id);
+        }
         final List<ComponentAnalysisDao.ComponentAnalysisComment> comments = withJdbiHandle(
                 handle -> new ComponentAnalysisDao(handle).getComments(id));
         return Response.ok(ListComponentAnalysisCommentsResponse.builder()
@@ -175,8 +186,11 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
     }
 
     @Override
-    @PermissionRequired(Permissions.Constants.POLICY_MANAGEMENT)
+    @PermissionRequired(Permissions.Constants.COMPONENT_ANALYSIS)
     public Response createComponentAnalysisComment(final Long id, final CreateComponentAnalysisCommentRequest request) {
+        try (final var qm = new QueryManager()) {
+            requireAnalysis(qm, id);
+        }
         final String commenter = getPrincipal().getName();
         inJdbiTransaction(handle -> new ComponentAnalysisDao(handle)
                 .createComments(List.of(new CreateCommentCommand(id, commenter, request.getComment()))));
@@ -188,57 +202,47 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 .build();
     }
 
-    private static long requireProjectId(final UUID uuid) {
-        final Long projectId = withJdbiHandle(handle -> handle
-                .createQuery("SELECT \"ID\" FROM \"PROJECT\" WHERE \"UUID\" = :uuid")
-                .bind("uuid", uuid)
-                .mapTo(Long.class)
-                .findOne()
-                .orElse(null));
-        if (projectId == null) {
+    /**
+     * Curation is scoped like everything else in the portfolio: the project
+     * must exist (404) and the principal must have access to it (403).
+     */
+    private Project requireProject(final QueryManager qm, final UUID uuid) {
+        final Project project = qm.getObjectByUuid(Project.class, uuid);
+        if (project == null) {
             throw new NotFoundException();
         }
-        return projectId;
+        requireAccess(qm, project);
+        return project;
     }
 
     /**
-     * Resolves an SPDX license ID or (custom) license name; 400 when unknown —
-     * overrides must reference licenses DT can attach to components.
+     * An analysis addressed by id carries its project; access is checked on
+     * that project.
      */
-    private static License resolveLicense(final QueryManager qm, final String licenseIdOrName) {
-        final License license = qm.getLicenseByIdOrName(licenseIdOrName);
-        if (license != null && license != License.UNRESOLVED) {
-            return license;
-        }
-        final License customLicense = qm.getCustomLicenseByName(licenseIdOrName);
-        if (customLicense != null && customLicense != License.UNRESOLVED) {
-            return customLicense;
-        }
-        throw new BadRequestException("License %s is not known; create it as a custom license first".formatted(licenseIdOrName));
-    }
-
-    /**
-     * Display label of a license: its SPDX ID, or the name for custom licenses.
-     */
-    private static String licenseLabel(final QueryManager qm, final long licenseId) {
-        final License license = qm.getObjectById(License.class, licenseId);
-        if (license == null) {
-            return "unknown";
-        }
-        return license.getLicenseId() != null ? license.getLicenseId() : license.getName();
+    private ComponentAnalysis requireAnalysis(final QueryManager qm, final long id) {
+        final ComponentAnalysis analysis = withJdbiHandle(handle -> new ComponentAnalysisDao(handle).getById(id))
+                .orElseThrow(NotFoundException::new);
+        requireAccess(qm, qm.getObjectById(Project.class, analysis.projectId()));
+        return analysis;
     }
 
     private static org.dependencytrack.api.v2.model.ComponentAnalysis mapAnalysis(
             final QueryManager qm, final ComponentAnalysis analysis) {
         final String licenseIdOrName = analysis.licenseId() != null
-                ? licenseLabel(qm, analysis.licenseId())
+                ? LicenseOverrideResolver.licenseLabel(qm, analysis.licenseId())
                 : null;
+        // the snapshot keeps the three slots apart; the response carries the
+        // value plus which slot it came from, since the policies judge an id,
+        // a name and an expression differently
         String declaredLicense = analysis.declaredLicenseExpression();
+        String declaredLicenseKind = declaredLicense != null ? "expression" : null;
         if (declaredLicense == null && analysis.declaredLicenseId() != null) {
-            declaredLicense = licenseLabel(qm, analysis.declaredLicenseId());
+            declaredLicense = LicenseOverrideResolver.licenseLabel(qm, analysis.declaredLicenseId());
+            declaredLicenseKind = "id";
         }
-        if (declaredLicense == null) {
+        if (declaredLicense == null && analysis.declaredLicenseName() != null) {
             declaredLicense = analysis.declaredLicenseName();
+            declaredLicenseKind = "name";
         }
         return org.dependencytrack.api.v2.model.ComponentAnalysis.builder()
                 .id(analysis.id())
@@ -247,7 +251,10 @@ public final class ComponentAnalysesResource extends AbstractApiResource impleme
                 .name(analysis.name())
                 .version(analysis.version())
                 .license(licenseIdOrName)
+                .licenseExpression(analysis.licenseExpression())
+                .licenseName(analysis.licenseName())
                 .declaredLicense(declaredLicense)
+                .declaredLicenseKind(declaredLicenseKind)
                 .details(analysis.details())
                 .build();
     }

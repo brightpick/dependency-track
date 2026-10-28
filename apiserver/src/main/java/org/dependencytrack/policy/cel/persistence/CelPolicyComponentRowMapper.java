@@ -67,6 +67,7 @@ public final class CelPolicyComponentRowMapper implements RowMapper<Component> {
         maybeSet(rs, "blake3", ResultSet::getString, builder::setBlake3);
         maybeSet(rs, "license_name", ResultSet::getString, builder::setLicenseName);
         maybeSet(rs, "license_expression", ResultSet::getString, builder::setLicenseExpression);
+        maybeSet(rs, "license_curated", ResultSet::getBoolean, builder::setLicenseCurated);
         maybeSet(rs, "published_at", RowMapperUtil::nullableTimestamp, builder::setPublishedAt);
         maybeSet(rs, "latest_version", ResultSet::getString, builder::setLatestVersion);
         maybeSet(rs, "latest_version_published_at", RowMapperUtil::nullableTimestamp, builder::setLatestVersionPublishedAt);
